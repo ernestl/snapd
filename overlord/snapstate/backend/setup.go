@@ -228,7 +228,7 @@ func (b Backend) RemoveComponentFiles(cpi snap.ContainerPlaceInfo, installRecord
 		return err
 	}
 
-	// Remove /snap/<snap_instance>/components/<snap_rev>/<comp_name>
+	// Remove /snap/<snap_instance>/components/mnt/<comp_name>/<comp_rev>
 	if err := os.RemoveAll(cpi.MountDir()); err != nil {
 		return err
 	}
@@ -240,10 +240,6 @@ func (b Backend) RemoveComponentFiles(cpi snap.ContainerPlaceInfo, installRecord
 			return err
 		}
 	}
-
-	// TODO should we check here if there are other components installed
-	// for this snap revision or for other revisions and if not delete
-	// <snap_rev>/ and maybe also components/<snap_rev>/?
 
 	return nil
 }
@@ -267,11 +263,16 @@ func (b Backend) RemoveSnapDir(s snap.PlaceInfo, hasOtherInstances bool) error {
 
 func (b Backend) RemoveComponentDir(cpi snap.ContainerPlaceInfo) error {
 	compMountDir := cpi.MountDir()
-	// Remove /snap/<snap_instance>/components/<snap_rev>/<comp_name>
+	// Remove /snap/<snap_instance>/components/mnt/<snap_rev>/<comp_name>/<comp_rev>
 	os.Remove(compMountDir)
-	// and /snap/<snap_instance>/components/<snap_rev> (might fail
-	// if there are other components installed for this revision)
+	// and /snap/<snap_instance>/components/mnt/<snap_rev>/<comp_name> (might fail
+	// if there are other revisions for this component)
 	os.Remove(filepath.Dir(compMountDir))
+
+	// TODO should we check here if there are other components installed
+	// for this snap revision or for other revisions and if not delete
+	// <snap_rev>/ and maybe also components/mnt/<snap_rev>/?
+
 	return nil
 }
 
