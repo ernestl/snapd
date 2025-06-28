@@ -185,7 +185,7 @@ func MockSecbootCheckTPMKeySealingSupported(f func(tpmMode secboot.TPMProvisionM
 }
 
 // MockSecbootPreinstallCheck mocks secboot.PreinstallCheck usage by the package for testing.
-func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
+func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error)) (restore func()) {
 	osutil.MustBeTestBinary("secbootPreinstallCheck only can be mocked in tests")
 	old := secbootPreinstallCheck
 	secbootPreinstallCheck = f
@@ -330,7 +330,7 @@ func encryptionAvailabilityCheck(model *asserts.Model, tpmMode secboot.TPMProvis
 
 		ctx, cancel := context.WithTimeout(context.Background(), preinstallCheckTimeout)
 		defer cancel()
-		preinstallErrorDetails, err := secbootPreinstallCheck(ctx, images)
+		_, preinstallErrorDetails, err := secbootPreinstallCheck(ctx, images)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return "", nil, fmt.Errorf("preinstall check timed out: %v", err)
