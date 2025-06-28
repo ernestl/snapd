@@ -167,6 +167,10 @@ func getSystemDetails(c *Command, r *http.Request, user *auth.UserState) Respons
 		return InternalError(err.Error())
 	}
 
+	// cached data includes AvailabilityCheckContext which is required for
+	// potential follow up preinstall check actions
+	cacheRefreshEncryptionSupportInfoByLabel(c, wantedSystemLabel, encryptionInfo)
+
 	rsp := client.SystemDetails{
 		Current: sys.Current,
 		Label:   sys.Label,
@@ -202,6 +206,7 @@ type systemActionRequest struct {
 	client.InstallSystemOptions
 	client.CreateSystemOptions
 	client.QualityCheckOptions
+	client.FixEncryptionSupportOptions
 }
 
 func postSystemsAction(c *Command, r *http.Request, user *auth.UserState) Response {
@@ -278,6 +283,8 @@ func postSystemsActionJSON(c *Command, r *http.Request) Response {
 		return postSystemActionCheckPassphrase(c, systemLabel, &req)
 	case "check-pin":
 		return postSystemActionCheckPIN(c, systemLabel, &req)
+	case "fix-encryption-support":
+		return postSystemActionFixEncryptionSupport(c, systemLabel, &req)
 	default:
 		return BadRequest("unsupported action %q", req.Action)
 	}
@@ -632,10 +639,14 @@ func cachedEncryptionSupportInfoByLabel(c *Command, systemLabel string) (*instal
 	if err != nil {
 		return nil, err
 	}
+	cacheRefreshEncryptionSupportInfoByLabel(c, systemLabel, encryptionInfo)
+	return encryptionInfo, nil
+}
+
+func cacheRefreshEncryptionSupportInfoByLabel(c *Command, systemLabel string, encryptionInfo *install.EncryptionSupportInfo) {
 	c.d.state.Lock()
 	c.d.state.Cache(encryptionSupportInfoKey{systemLabel}, encryptionInfo)
 	c.d.state.Unlock()
-	return encryptionInfo, nil
 }
 
 var deviceValidatePassphrase = device.ValidatePassphrase
@@ -717,4 +728,66 @@ func postSystemActionCheckPIN(c *Command, systemLabel string, req *systemActionR
 	}
 
 	return postValidatePassphrase(device.AuthModePIN, req.PIN)
+}
+
+func postSystemActionFixEncryptionSupport(c *Command, systemLabel string, req *systemActionRequest) Response {
+	if systemLabel == "" {
+		return BadRequest("system action requires the system label to be provided")
+	}
+
+	if req.FixAction == "" {
+		return BadRequest("error fix action must be provided in request body for action %q", req.Action)
+	}
+
+	if req.Args == nil {
+		return BadRequest("error fix action args must be provided in request body for action %q", req.Action)
+	}
+
+	deviceMgr := c.d.overlord.DeviceManager()
+
+	// XXX: Should probably cache all of this output to avoid this call altogether?
+	sys, gadgetInfo, encryptionInfo, err := deviceManagerSystemAndGadgetAndEncryptionInfo(deviceMgr, systemLabel)
+	if err != nil {
+		return InternalError(err.Error())
+	}
+
+	encryptionInfo, err = cachedEncryptionSupportInfoByLabel(c, systemLabel)
+	if err != nil {
+		return InternalError(err.Error())
+	}
+
+	if encryptionInfo.Available == true {
+		//XXX: Should this be an error kind?
+		return BadRequest("encryption is already available")
+	}
+
+	// perform preinstall check with specified action
+
+	//XXX: Remove duplication with getting details
+	rsp := client.SystemDetails{
+		Current: sys.Current,
+		Label:   sys.Label,
+		Brand: snap.StoreAccount{
+			ID:          sys.Brand.AccountID(),
+			Username:    sys.Brand.Username(),
+			DisplayName: sys.Brand.DisplayName(),
+			Validation:  sys.Brand.Validation(),
+		},
+		// no body: we expect models to have empty bodies
+		Model: sys.Model.Headers(),
+		AvailableOptional: client.AvailableForInstall{
+			Snaps:      sys.OptionalContainers.Snaps,
+			Components: sys.OptionalContainers.Components,
+		},
+		Volumes:           gadgetInfo.Volumes,
+		StorageEncryption: storageEncryption(encryptionInfo),
+	}
+	for _, sa := range sys.Actions {
+		rsp.Actions = append(rsp.Actions, client.SystemAction{
+			Title: sa.Title,
+			Mode:  sa.Mode,
+		})
+	}
+
+	return SyncResponse(rsp)
 }
