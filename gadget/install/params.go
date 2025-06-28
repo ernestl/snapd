@@ -68,6 +68,10 @@ type EncryptionSetupData struct {
 	// corresponding recovery key should be used for all relevant
 	// volumes during installation.
 	recoveryKeyID string
+	// optional preinstall check result that reflects the outcome
+	// of the most recent check and contains information required
+	// to reseal post install
+	preinstallCheckResult *secboot.PreinstallCheckResult
 }
 
 // EncryptedDevices returns a map partition role -> LUKS mapper device.
@@ -90,6 +94,10 @@ func (esd *EncryptionSetupData) SetRecoveryKeyID(keyID string) {
 
 func (esd *EncryptionSetupData) RecoveryKeyID() string {
 	return esd.recoveryKeyID
+}
+
+func (esd *EncryptionSetupData) PreinstallCheckResult() *secboot.PreinstallCheckResult {
+	return esd.preinstallCheckResult
 }
 
 // MockEncryptedDeviceAndRole is meant to be used for unit tests from other

@@ -56,7 +56,7 @@ import (
 	"github.com/snapcore/snapd/secboot/keys"
 	"github.com/snapcore/snapd/seed"
 	"github.com/snapcore/snapd/snap"
-	"github.com/snapcore/snapd/snap/snapfile"
+	//"github.com/snapcore/snapd/snap/snapfile"
 	"github.com/snapcore/snapd/systemd"
 	"github.com/snapcore/snapd/timings"
 )
@@ -313,7 +313,7 @@ func (m *DeviceManager) doSetupRunSystem(t *state.Task, _ *tomb.Tomb) error {
 	}
 
 	if useEncryption {
-		if err := installLogic.PrepareEncryptedSystemData(model, installedSystem.BootstrappedContainerForRole, nil, trustedInstallObserver); err != nil {
+		if err := installLogic.PrepareEncryptedSystemData(model, installedSystem.BootstrappedContainerForRole, nil, nil, trustedInstallObserver); err != nil {
 			return err
 		}
 	}
@@ -640,7 +640,7 @@ func (m *DeviceManager) doFactoryResetRunSystem(t *state.Task, _ *tomb.Tomb) err
 		}
 		installedSystem.BootstrappedContainerForRole[gadget.SystemSave] = saveBoostrapContainer
 
-		if err := installLogic.PrepareEncryptedSystemData(model, installedSystem.BootstrappedContainerForRole, nil, trustedInstallObserver); err != nil {
+		if err := installLogic.PrepareEncryptedSystemData(model, installedSystem.BootstrappedContainerForRole, nil, nil, trustedInstallObserver); err != nil {
 			return err
 		}
 	}
@@ -995,6 +995,8 @@ func (m *DeviceManager) doInstallFinish(t *state.Task, _ *tomb.Tomb) error {
 		return err
 	}
 
+	// cache is used to transport encryptionSetupData between install steps
+	// "install-setup-storage-encryption" and "install-finish"
 	var encryptSetupData *install.EncryptionSetupData
 	cached := st.Cached(encryptionSetupDataKey{systemLabel})
 	if cached != nil {
@@ -1173,7 +1175,8 @@ func (m *DeviceManager) doInstallFinish(t *state.Task, _ *tomb.Tomb) error {
 	if useEncryption {
 		bootstrappedContainersForRole := install.BootstrappedContainersForRole(encryptSetupData)
 		if trustedInstallObserver != nil {
-			if err := installLogic.PrepareEncryptedSystemData(systemAndSnaps.Model, bootstrappedContainersForRole, encryptSetupData.VolumesAuth(), trustedInstallObserver); err != nil {
+			if err := installLogic.PrepareEncryptedSystemData(systemAndSnaps.Model, bootstrappedContainersForRole,
+				encryptSetupData.VolumesAuth(), encryptSetupData.PreinstallCheckResult(), trustedInstallObserver); err != nil {
 				return err
 			}
 		}
@@ -1249,7 +1252,7 @@ func (m *DeviceManager) doInstallFinish(t *state.Task, _ *tomb.Tomb) error {
 	return nil
 }
 
-func checkVolumesAuth(volumesAuth *device.VolumesAuthOptions, encryptInfo installLogic.EncryptionSupportInfo) error {
+func checkVolumesAuth(volumesAuth *device.VolumesAuthOptions, encryptInfo *installLogic.EncryptionSupportInfo) error {
 	if volumesAuth == nil {
 		return nil
 	}
@@ -1312,17 +1315,8 @@ func (m *DeviceManager) doInstallSetupStorageEncryption(t *state.Task, _ *tomb.T
 	}
 	defer unmount()
 
-	// Gadget information
-	snapf, err := snapfile.Open(systemAndSeeds.SeedSnapsByType[snap.TypeGadget].Path)
-	if err != nil {
-		return fmt.Errorf("cannot open gadget snap: %v", err)
-	}
-	gadgetInfo, err := gadget.ReadInfoFromSnapFileNoValidate(snapf, systemAndSeeds.Model)
-	if err != nil {
-		return fmt.Errorf("reading gadget information: %v", err)
-	}
-
-	encryptInfo, err := m.encryptionSupportInfo(systemAndSeeds.Model, secboot.TPMProvisionFull, systemAndSeeds.InfosByType[snap.TypeKernel], gadgetInfo, &systemAndSeeds.SystemSnapdVersions)
+	const useCache = false
+	_, encryptInfo, err := m.encryptionSupportInfo(systemAndSeeds, secboot.TPMProvisionFull, nil, useCache)
 	if err != nil {
 		return err
 	}
@@ -1341,7 +1335,21 @@ func (m *DeviceManager) doInstallSetupStorageEncryption(t *state.Task, _ *tomb.T
 
 	// TODO:ICE: support device.EncryptionTypeLUKSWithICE in the API
 	encType := device.EncryptionTypeLUKS
-	encryptionSetupData, err := installEncryptPartitions(onVolumes, volumesAuth, encType, systemAndSeeds.Model, mntPtForType[snap.TypeGadget], mntPtForType[snap.TypeKernel], perfTimings)
+
+	var checkResult *secboot.PreinstallCheckResult
+	_, err = encryptInfo.CheckContext()
+	if err != nil {
+		// this indicates that the preinstall check was used and therefore
+		// check result is required to be stored for use at run time
+		checkResult, err := encryptInfo.CheckResult()
+		if err != nil || checkResult == nil {
+			fmt.Errorf("internal error: preinstall check result missing")
+		}
+	}
+
+	encryptionSetupData, err := installEncryptPartitions(
+		onVolumes, volumesAuth, checkResult, encType, systemAndSeeds.Model,
+		mntPtForType[snap.TypeGadget], mntPtForType[snap.TypeKernel], perfTimings)
 	if err != nil {
 		return err
 	}
@@ -1353,6 +1361,8 @@ func (m *DeviceManager) doInstallSetupStorageEncryption(t *state.Task, _ *tomb.T
 	chg := t.Change()
 	chg.Set("api-data", apiData)
 
+	// cache is used to transport encryptionSetupData between install steps
+	// "install-setup-storage-encryption" and "install-finish"
 	st.Cache(encryptionSetupDataKey{systemLabel}, encryptionSetupData)
 
 	return nil

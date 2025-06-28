@@ -2266,7 +2266,11 @@ func (m *DeviceManager) systems() ([]*System, error) {
 // SystemAndGadgetAndEncryptionInfo return the system details
 // including the model assertion, gadget details and encryption info
 // for the given system label.
-func (m *DeviceManager) SystemAndGadgetAndEncryptionInfo(wantedSystemLabel string) (*System, *gadget.Info, *install.EncryptionSupportInfo, error) {
+func (m *DeviceManager) SystemAndGadgetAndEncryptionInfo(
+	wantedSystemLabel string,
+	checkAction *secboot.PreinstallAction,
+	useCache bool,
+) (*System, *gadget.Info, *install.EncryptionSupportInfo, error) {
 	// TODO check that the system is not a classic boot one when the
 	// installer is not anymore.
 
@@ -2276,31 +2280,13 @@ func (m *DeviceManager) SystemAndGadgetAndEncryptionInfo(wantedSystemLabel strin
 		return nil, nil, nil, err
 	}
 
-	// Gadget information
-	snapf, err := snapfile.Open(systemAndSnaps.SeedSnapsByType[snap.TypeGadget].Path)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("cannot open gadget snap: %v", err)
-	}
-	gadgetInfo, err := gadget.ReadInfoFromSnapFileNoValidate(snapf, systemAndSnaps.Model)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("reading gadget information: %v", err)
-	}
-
 	// Encryption details
-	encInfo, err := m.encryptionSupportInfo(systemAndSnaps.Model, secboot.TPMProvisionFull, systemAndSnaps.InfosByType[snap.TypeKernel], gadgetInfo, &systemAndSnaps.SystemSnapdVersions)
+	gadgetInfo, encInfo, err := m.encryptionSupportInfo(systemAndSnaps, secboot.TPMProvisionFull, checkAction, useCache)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Make sure gadget is valid for model and available encryption
-	opts := &gadget.ValidationConstraints{
-		EncryptedData: encInfo.StorageSafety == asserts.StorageSafetyEncrypted,
-	}
-	if err := gadget.Validate(gadgetInfo, systemAndSnaps.Model, opts); err != nil {
-		return nil, nil, nil, fmt.Errorf("cannot validate gadget.yaml: %v", err)
-	}
-
-	return systemAndSnaps.System, gadgetInfo, &encInfo, err
+	return systemAndSnaps.System, gadgetInfo, encInfo, err
 }
 
 type systemAndEssentialSnaps struct {
@@ -2310,6 +2296,32 @@ type systemAndEssentialSnaps struct {
 	InfosByType         map[snap.Type]*snap.Info
 	CompsByType         map[snap.Type][]install.ComponentSeedInfo
 	SeedSnapsByType     map[snap.Type]*seed.Snap
+}
+
+func (s *systemAndEssentialSnaps) gadgetInfo() (*gadget.Info, error) {
+	snapInfo, ok := s.SeedSnapsByType[snap.TypeGadget]
+	if !ok {
+		return nil, fmt.Errorf("cannot find gadget info")
+	}
+
+	snapf, err := snapfile.Open(snapInfo.Path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open gadget snap: %v", err)
+	}
+
+	gadgetInfo, err := gadget.ReadInfoFromSnapFileNoValidate(snapf, s.Model)
+	if err != nil {
+		return nil, fmt.Errorf("reading gadget information: %v", err)
+	}
+	return gadgetInfo, nil
+}
+
+func (s *systemAndEssentialSnaps) kernelInfo() (*snap.Info, error) {
+	snapInfo, ok := s.InfosByType[snap.TypeKernel]
+	if !ok {
+		return nil, fmt.Errorf("cannot find kernel info")
+	}
+	return snapInfo, nil
 }
 
 // DefaultRecoverySystem returns the default recovery system, if there is one.
@@ -2940,6 +2952,78 @@ func (m *DeviceManager) checkEncryption(st *state.State, deviceCtx snapstate.Dev
 	return install.CheckEncryptionSupport(model, tpmMode, kernelInfo, gadgetInfo, m.runFDESetupHook)
 }
 
-func (m *DeviceManager) encryptionSupportInfo(model *asserts.Model, tpmMode secboot.TPMProvisionMode, kernelInfo *snap.Info, gadgetInfo *gadget.Info, systemSnapdVersions *install.SystemSnapdVersions) (install.EncryptionSupportInfo, error) {
-	return install.GetEncryptionSupportInfo(model, tpmMode, kernelInfo, gadgetInfo, systemSnapdVersions, m.runFDESetupHook)
+func (m *DeviceManager) encryptionSupportInfo(
+	systemAndSnaps *systemAndEssentialSnaps,
+	tpmMode secboot.TPMProvisionMode,
+	checkAction *secboot.PreinstallAction,
+	useCache bool,
+) (*gadget.Info, *install.EncryptionSupportInfo, error) {
+
+	if checkAction != nil && useCache {
+		return nil, nil, errors.New("internal error: cannot use cache with check action")
+	}
+
+	gadgetInfo, err := systemAndSnaps.gadgetInfo()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	kernelInfo, err := systemAndSnaps.kernelInfo()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var checkContext *secboot.PreinstallCheckContext
+	encryptionSupportInfo := m.readCacheEncryptionSupportInfo(systemAndSnaps.Label)
+
+	if checkAction != nil {
+		// a check action requires only the check context from the cache
+		// and need to run the check
+		if encryptionSupportInfo == nil {
+			return nil, nil, errors.New("cannot use check action without cached encryption information")
+		}
+		checkContext, err = encryptionSupportInfo.CheckContext()
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot use check action without cached check context: %v", err)
+		}
+	} else if useCache && encryptionSupportInfo != nil {
+		return gadgetInfo, encryptionSupportInfo, nil
+	}
+
+	newEncryptionSupportInfo, err := install.GetEncryptionSupportInfo(
+		systemAndSnaps.Model,
+		tpmMode,
+		kernelInfo,
+		gadgetInfo,
+		&systemAndSnaps.SystemSnapdVersions,
+		m.runFDESetupHook,
+		checkContext,
+		checkAction,
+	)
+	if err == nil {
+		m.refreshCacheEncryptionSupportInfo(systemAndSnaps.Label, &newEncryptionSupportInfo)
+	}
+
+	return gadgetInfo, &newEncryptionSupportInfo, err
+}
+
+type encryptionSupportInfoKey struct{ systemLabel string }
+
+func (m *DeviceManager) refreshCacheEncryptionSupportInfo(systemLabel string, encryptionInfo *install.EncryptionSupportInfo) {
+	m.state.Lock()
+	m.state.Cache(encryptionSupportInfoKey{systemLabel}, encryptionInfo)
+	m.state.Unlock()
+}
+
+func (m *DeviceManager) readCacheEncryptionSupportInfo(systemLabel string) *install.EncryptionSupportInfo {
+	m.state.Lock()
+	cached := m.state.Cached(encryptionSupportInfoKey{systemLabel})
+	m.state.Unlock()
+	if cached != nil {
+		encryptionSupportInfo, ok := cached.(*install.EncryptionSupportInfo)
+		if ok {
+			return encryptionSupportInfo
+		}
+	}
+	return nil
 }

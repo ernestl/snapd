@@ -682,12 +682,13 @@ func SaveStorageTraits(model gadget.Model, vols map[string]*gadget.Volume, encry
 
 func EncryptPartitions(
 	onVolumes map[string]*gadget.Volume, volumesAuth *device.VolumesAuthOptions,
-	encryptionType device.EncryptionType, model *asserts.Model,
-	gadgetRoot, kernelRoot string, perfTimings timings.Measurer,
+	checkResult *secboot.PreinstallCheckResult, encryptionType device.EncryptionType,
+	model *asserts.Model, gadgetRoot, kernelRoot string, perfTimings timings.Measurer,
 ) (*EncryptionSetupData, error) {
 	setupData := &EncryptionSetupData{
-		parts:       make(map[string]partEncryptionData),
-		volumesAuth: volumesAuth,
+		parts:                 make(map[string]partEncryptionData),
+		volumesAuth:           volumesAuth,
+		preinstallCheckResult: checkResult,
 	}
 	for volName, vol := range onVolumes {
 		onDiskVol, err := gadget.OnDiskVolumeFromGadgetVol(vol)
