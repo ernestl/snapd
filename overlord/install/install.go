@@ -89,6 +89,11 @@ type EncryptionSupportInfo struct {
 	// availability errors identified during preinstall check.
 	AvailabilityCheckErrors []secboot.PreinstallErrorDetails
 
+	// AvailabilityCheckContext holds the configuration and state captured during
+	// the preinstall check. It is required for performing follow-up actions to
+	// attempt resolution of identified errors.
+	AvailabilityCheckContext *secboot.PreinstallCheckContext
+
 	// PassphraseAuthAvailable is set if the passphrase authentication
 	// is supported.
 	PassphraseAuthAvailable bool
@@ -185,7 +190,7 @@ func MockSecbootCheckTPMKeySealingSupported(f func(tpmMode secboot.TPMProvisionM
 }
 
 // MockSecbootPreinstallCheck mocks secboot.PreinstallCheck usage by the package for testing.
-func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
+func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error)) (restore func()) {
 	osutil.MustBeTestBinary("secbootPreinstallCheck only can be mocked in tests")
 	old := secbootPreinstallCheck
 	secbootPreinstallCheck = f
@@ -254,7 +259,7 @@ func GetEncryptionSupportInfo(model *asserts.Model, tpmMode secboot.TPMProvision
 	case checkFDESetupHookEncryption:
 		res.Type, checkEncryptionErr = checkFDEFeatures(runSetupHook)
 	case checkSecbootEncryption:
-		unavailableReason, preinstallErrorDetails, err := encryptionAvailabilityCheck(model, tpmMode)
+		preinstallCheckContext, unavailableReason, preinstallErrorDetails, err := encryptionAvailabilityCheck(model, tpmMode)
 		if err != nil {
 			return res, fmt.Errorf("internal error: cannot perform secboot encryption check: %v", err)
 		}
@@ -265,6 +270,7 @@ func GetEncryptionSupportInfo(model *asserts.Model, tpmMode secboot.TPMProvision
 			checkEncryptionErr = errors.New(unavailableReason)
 			res.AvailabilityCheckErrors = preinstallErrorDetails
 		}
+		res.AvailabilityCheckContext = preinstallCheckContext
 	default:
 		return res, fmt.Errorf("internal error: no encryption checked in encryptionSupportInfo")
 	}
@@ -316,44 +322,44 @@ func GetEncryptionSupportInfo(model *asserts.Model, tpmMode secboot.TPMProvision
 	return res, nil
 }
 
-func encryptionAvailabilityCheck(model *asserts.Model, tpmMode secboot.TPMProvisionMode) (string, []secboot.PreinstallErrorDetails, error) {
+func encryptionAvailabilityCheck(model *asserts.Model, tpmMode secboot.TPMProvisionMode) (*secboot.PreinstallCheckContext, string, []secboot.PreinstallErrorDetails, error) {
 	supported, err := preinstallCheckSupported(model)
 	if err != nil {
-		return "", nil, fmt.Errorf("cannot confirm preinstall check support: %v", err)
+		return nil, "", nil, fmt.Errorf("cannot confirm preinstall check support: %v", err)
 	}
 	if supported {
 		// use comprehensive preinstall check
 		images, err := orderedCurrentBootImages(model)
 		if err != nil {
-			return "", nil, fmt.Errorf("cannot locate ordered current boot images: %v", err)
+			return nil, "", nil, fmt.Errorf("cannot locate ordered current boot images: %v", err)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), preinstallCheckTimeout)
 		defer cancel()
-		preinstallErrorDetails, err := secbootPreinstallCheck(ctx, images)
+		preinstallCheckContext, preinstallErrorDetails, err := secbootPreinstallCheck(ctx, images)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return "", nil, fmt.Errorf("preinstall check timed out: %v", err)
+				return nil, "", nil, fmt.Errorf("preinstall check timed out: %v", err)
 			}
-			return "", nil, err
+			return nil, "", nil, err
 		}
 
 		switch len(preinstallErrorDetails) {
 		case 0:
-			return "", nil, nil
+			return preinstallCheckContext, "", nil, nil
 		case 1:
-			return preinstallErrorDetails[0].Message, preinstallErrorDetails, nil
+			return preinstallCheckContext, preinstallErrorDetails[0].Message, preinstallErrorDetails, nil
 		default:
-			return fmt.Sprintf("preinstall check identified %d errors", len(preinstallErrorDetails)), preinstallErrorDetails, nil
+			return preinstallCheckContext, fmt.Sprintf("preinstall check identified %d errors", len(preinstallErrorDetails)), preinstallErrorDetails, nil
 		}
 	}
 
 	// use general availability check
 	err = secbootCheckTPMKeySealingSupported(tpmMode)
 	if err != nil {
-		return err.Error(), nil, nil
+		return nil, err.Error(), nil, nil
 	}
-	return "", nil, nil
+	return nil, "", nil, nil
 }
 
 var preinstallCheckSupported = func(model *asserts.Model) (bool, error) {
