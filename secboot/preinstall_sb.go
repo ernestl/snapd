@@ -22,14 +22,26 @@ package secboot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	sb_efi "github.com/snapcore/secboot/efi"
 	sb_preinstall "github.com/snapcore/secboot/efi/preinstall"
 
 	"github.com/snapcore/snapd/logger"
+	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/systemd"
 )
+
+type PreinstallCheckContext struct {
+	sbRunChecksContext *sb_preinstall.RunChecksContext
+}
+
+type PreinstallCheckResult struct {
+	sbCheckResult *sb_preinstall.CheckResult
+}
 
 var (
 	sbPreinstallNewRunChecksContext = sb_preinstall.NewRunChecksContext
@@ -47,7 +59,7 @@ var (
 //
 // To support testing, when the system is running in a Virtual Machine, the check
 // configuration is modified to permit this to avoid an error.
-func PreinstallCheck(ctx context.Context, bootImagePaths []string) ([]PreinstallErrorDetails, error) {
+func PreinstallCheck(ctx context.Context, bootImagePaths []string) (*PreinstallCheckContext, []PreinstallErrorDetails, error) {
 	// allow value-added-retailer drivers that are:
 	//  - listed as Driver#### load options
 	//  - referenced in the DriverOrder UEFI variable
@@ -68,10 +80,36 @@ func PreinstallCheck(ctx context.Context, bootImagePaths []string) ([]Preinstall
 		bootImages = append(bootImages, sb_efi.NewFileImage(image))
 	}
 
-	checksContext := sbPreinstallNewRunChecksContext(checkFlags, bootImages, profileOptionFlags)
+	checkContext := &PreinstallCheckContext{
+		sbRunChecksContext: sbPreinstallNewRunChecksContext(checkFlags, bootImages, profileOptionFlags),
+	}
 
 	// no actions or action args for preinstall checks
-	result, err := sbPreinstallRunChecks(checksContext, ctx, sb_preinstall.ActionNone)
+	result, err := sbPreinstallRunChecks(checkContext.sbRunChecksContext, ctx, sb_preinstall.ActionNone)
+	if err != nil {
+		errorDetails, err := unwrapPreinstallCheckError(err)
+		return checkContext, errorDetails, err
+	}
+
+	if result.Warnings != nil {
+		for _, warn := range result.Warnings.Unwrap() {
+			logger.Noticef("preinstall check warning: %v", warn)
+		}
+	}
+
+	return checkContext, nil, nil
+}
+
+// PreinstallCheckAction runs a follow-up preinstall check using the specified
+// action to evaluate whether a previously reported issue can be resolved. It
+// reuses the check configuration and boot image state from the preinstall check
+// context. On success, it returns a list with details on all remaining errors
+// identified by secboot or nil if no errors were found. Any warnings contained
+// in the secboot result are logged. On failure, it returns the error
+// encountered while interpreting the secboot error.
+func (c *PreinstallCheckContext) PreinstallCheckAction(ctx context.Context, action *PreinstallAction) ([]PreinstallErrorDetails, error) {
+	//TODO:FDEM: Changes to secboot required to allow passing args in a more usable format
+	result, err := sbPreinstallRunChecks(c.sbRunChecksContext, ctx, sb_preinstall.Action(action.Action) /*, action.Args */)
 	if err != nil {
 		return unwrapPreinstallCheckError(err)
 	}
@@ -82,6 +120,33 @@ func PreinstallCheck(ctx context.Context, bootImagePaths []string) ([]Preinstall
 		}
 	}
 	return nil, nil
+}
+
+// CheckResult returns the preinstall check result. This result reflects the
+// outcome of the most recent check performed using this preinstall check
+// context. If the result is unavailable, an error is returned describing the
+// number of unresolved errors.
+func (c *PreinstallCheckContext) CheckResult() (*PreinstallCheckResult, error) {
+	result := c.sbRunChecksContext.Result()
+	if result == nil {
+		errorCount := len(c.sbRunChecksContext.Errors())
+		return nil, fmt.Errorf("preinstall check result unavailable: %d unresolved errors", errorCount)
+	}
+
+	return &PreinstallCheckResult{sbCheckResult: result}, nil
+}
+
+// Save writes the serialized preinstall check result in the location specified by the filename.
+func (r *PreinstallCheckResult) Save(filename string) error {
+	bytes, err := json.Marshal(r.sbCheckResult)
+	if err != nil {
+		return fmt.Errorf("cannot serialize preinstall check result: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		return err
+	}
+	return osutil.AtomicWriteFile(filename, bytes, 0600, 0)
 }
 
 // unwrapPreinstallCheckError converts a single or compound preinstall check

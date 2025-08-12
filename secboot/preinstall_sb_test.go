@@ -24,6 +24,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/canonical/go-tpm2"
 	sb_efi "github.com/snapcore/secboot/efi"
@@ -254,7 +256,7 @@ func (s *preinstallSuite) testPreinstallCheckConfig(c *C, isVM, permitVM bool) {
 		cmdExit = `exit 0`
 	}
 	systemdCmd := testutil.MockCommand(c, "systemd-detect-virt", cmdExit)
-	defer systemdCmd.Restore()
+	s.AddCleanup(systemdCmd.Restore)
 
 	restore := secboot.MockSbPreinstallNewRunChecksContext(
 		func(initialFlags sb_preinstall.CheckFlags, loadedImages []sb_efi.Image, profileOpts sb_preinstall.PCRProfileOptionsFlags) *sb_preinstall.RunChecksContext {
@@ -268,7 +270,7 @@ func (s *preinstallSuite) testPreinstallCheckConfig(c *C, isVM, permitVM bool) {
 
 			return nil
 		})
-	defer restore()
+	s.AddCleanup(restore)
 
 	restore = secboot.MockSbPreinstallRun(
 		func(checkCtx *sb_preinstall.RunChecksContext, ctx context.Context, action sb_preinstall.Action, args ...any) (*sb_preinstall.CheckResult, error) {
@@ -279,9 +281,10 @@ func (s *preinstallSuite) testPreinstallCheckConfig(c *C, isVM, permitVM bool) {
 
 			return &sb_preinstall.CheckResult{}, nil
 		})
-	defer restore()
+	s.AddCleanup(restore)
 
-	errorDetails, err := secboot.PreinstallCheck(context.Background(), nil)
+	checkContext, errorDetails, err := secboot.PreinstallCheck(context.Background(), nil)
+	c.Assert(checkContext, NotNil)
 	c.Assert(err, IsNil)
 	c.Assert(errorDetails, IsNil)
 }
@@ -300,7 +303,9 @@ func (s *preinstallSuite) TestPreinstallCheckConfig(c *C) {
 	}
 }
 
-func (s *preinstallSuite) testPreinstallCheck(c *C, detectErrors, failUnwrap bool) {
+// testPreinstallCheckAndAction is a helper to test PreinstallCheck that
+// provides a CheckContext and CheckContext method PreinstallCheckAction
+func (s *preinstallSuite) testPreinstallCheckAndAction(c *C, checkAction *secboot.PreinstallAction, detectErrors, failUnwrap bool) *secboot.PreinstallCheckContext {
 	bootImagePaths := []string{
 		"/cdrom/EFI/boot/bootXXX.efi",
 		"/cdrom/EFI/boot/grubXXX.efi",
@@ -308,7 +313,9 @@ func (s *preinstallSuite) testPreinstallCheck(c *C, detectErrors, failUnwrap boo
 	}
 
 	systemdCmd := testutil.MockCommand(c, "systemd-detect-virt", "exit 1")
-	defer systemdCmd.Restore()
+	s.AddCleanup(systemdCmd.Restore)
+
+	expectedRunCheckContext := &sb_preinstall.RunChecksContext{}
 
 	restore := secboot.MockSbPreinstallNewRunChecksContext(
 		func(initialFlags sb_preinstall.CheckFlags, loadedImages []sb_efi.Image, profileOpts sb_preinstall.PCRProfileOptionsFlags) *sb_preinstall.RunChecksContext {
@@ -319,17 +326,19 @@ func (s *preinstallSuite) testPreinstallCheck(c *C, detectErrors, failUnwrap boo
 				c.Check(image.String(), Equals, bootImagePaths[i])
 			}
 
-			return &sb_preinstall.RunChecksContext{}
+			return expectedRunCheckContext
 		})
-	defer restore()
+	s.AddCleanup(restore)
+
+	expectedAction := sb_preinstall.ActionNone
 
 	restore = secboot.MockSbPreinstallRun(
 		func(checkCtx *sb_preinstall.RunChecksContext, ctx context.Context, action sb_preinstall.Action, args ...any) (*sb_preinstall.CheckResult, error) {
-			c.Assert(checkCtx, NotNil)
+			c.Assert(checkCtx, Equals, expectedRunCheckContext)
 			c.Assert(checkCtx.Errors(), IsNil)
 			c.Assert(checkCtx.Result(), IsNil)
 			c.Assert(ctx, NotNil)
-			c.Assert(action, Equals, sb_preinstall.ActionNone)
+			c.Assert(action, Equals, expectedAction)
 			c.Assert(args, IsNil)
 
 			if detectErrors {
@@ -363,54 +372,151 @@ func (s *preinstallSuite) testPreinstallCheck(c *C, detectErrors, failUnwrap boo
 				}, nil
 			}
 		})
-	defer restore()
+	s.AddCleanup(restore)
 
 	logbuf, restore := logger.MockLogger()
-	defer restore()
+	s.AddCleanup(restore)
 
-	errorDetails, err := secboot.PreinstallCheck(context.Background(), bootImagePaths)
-	if detectErrors {
-		c.Assert(err, IsNil)
-		c.Assert(logbuf.String(), Equals, "")
-		c.Assert(errorDetails, DeepEquals, []secboot.PreinstallErrorDetails{
-			{
-				Kind:    "tpm-hierarchies-owned",
-				Message: "error with TPM2 device: one or more of the TPM hierarchies is already owned",
-				Args: map[string]json.RawMessage{
-					"with-auth-value":  json.RawMessage(`[1073741834]`),
-					"with-auth-policy": json.RawMessage(`[1073741825]`),
+	// test PreinstallCheck
+	checkContext, errorDetails, err := secboot.PreinstallCheck(context.Background(), bootImagePaths)
+	c.Assert(secboot.ExtractSbCheckContext(checkContext), Equals, expectedRunCheckContext)
+
+	// inputs: err, errorDetails, logbuf, detectedErrors, failUnwrap
+	assertCheckOutcome := func() {
+		if detectErrors {
+			c.Assert(err, IsNil)
+			c.Assert(logbuf.String(), Equals, "")
+			c.Assert(errorDetails, DeepEquals, []secboot.PreinstallErrorDetails{
+				{
+					Kind:    "tpm-hierarchies-owned",
+					Message: "error with TPM2 device: one or more of the TPM hierarchies is already owned",
+					Args: map[string]json.RawMessage{
+						"with-auth-value":  json.RawMessage(`[1073741834]`),
+						"with-auth-policy": json.RawMessage(`[1073741825]`),
+					},
+					Actions: []string{"reboot-to-fw-settings"},
 				},
-				Actions: []string{"reboot-to-fw-settings"},
-			},
-			{
-				Kind:    "tpm-device-lockout",
-				Message: "error with TPM2 device: TPM is in DA lockout mode",
-				Args: map[string]json.RawMessage{
-					"interval-duration": json.RawMessage(`7200000000000`),
-					"total-duration":    json.RawMessage(`230400000000000`),
+				{
+					Kind:    "tpm-device-lockout",
+					Message: "error with TPM2 device: TPM is in DA lockout mode",
+					Args: map[string]json.RawMessage{
+						"interval-duration": json.RawMessage(`7200000000000`),
+						"total-duration":    json.RawMessage(`230400000000000`),
+					},
+					Actions: []string{"reboot-to-fw-settings"},
 				},
-				Actions: []string{"reboot-to-fw-settings"},
-			},
-		})
-	} else if failUnwrap {
-		c.Assert(err, ErrorMatches, `cannot unwrap error of unexpected type \*errors\.errorString \(the platform firmware indicates that DMA protections are insufficient\)`)
-		c.Assert(errorDetails, IsNil)
-	} else {
-		c.Assert(err, IsNil)
-		c.Assert(errorDetails, IsNil)
-		c.Assert(logbuf.String(), testutil.Contains, "preinstall check warning: warning 1")
-		c.Assert(logbuf.String(), testutil.Contains, "preinstall check warning: warning 2")
+			})
+		} else if failUnwrap {
+			c.Assert(err, ErrorMatches, `cannot unwrap error of unexpected type \*errors\.errorString \(the platform firmware indicates that DMA protections are insufficient\)`)
+			c.Assert(errorDetails, IsNil)
+		} else {
+			c.Assert(err, IsNil)
+			c.Assert(errorDetails, IsNil)
+			c.Assert(logbuf.String(), testutil.Contains, "preinstall check warning: warning 1")
+			c.Assert(logbuf.String(), testutil.Contains, "preinstall check warning: warning 2")
+		}
 	}
+	assertCheckOutcome()
+
+	// test PreinstallCheckAction
+	if checkAction != nil {
+		expectedAction = sb_preinstall.Action(checkAction.Action)
+		errorDetails, err = checkContext.PreinstallCheckAction(context.Background(), checkAction)
+	}
+	assertCheckOutcome()
+
+	// note: this context is not representative of an actual context because there
+	// is currently no way to update any of its private fields e.g. CheckResult
+	return checkContext
 }
 
 func (s *preinstallSuite) TestPreinstallCheckWithWarningsAndErrors(c *C) {
 	detectErrors := false // warnings and no errors
-	s.testPreinstallCheck(c, detectErrors, false)
+	s.testPreinstallCheckAndAction(c, nil, detectErrors, false)
+
 	detectErrors = true // errors and no warnings
-	s.testPreinstallCheck(c, detectErrors, false)
+	s.testPreinstallCheckAndAction(c, nil, detectErrors, false)
 }
 
 func (s *preinstallSuite) TestPreinstallCheckFailUnwrap(c *C) {
 	failUnwrap := true
-	s.testPreinstallCheck(c, false, failUnwrap)
+	s.testPreinstallCheckAndAction(c, nil, false, failUnwrap)
+}
+
+func (s *preinstallSuite) TestPreinstallCheckActionWithWarningsAndErrors(c *C) {
+	action := &secboot.PreinstallAction{
+		Action: string(sb_preinstall.ActionReboot),
+	}
+	detectErrors := false // warnings and no errors
+	s.testPreinstallCheckAndAction(c, action, detectErrors, false)
+
+	detectErrors = true // errors and no warnings
+	s.testPreinstallCheckAndAction(c, action, detectErrors, false)
+}
+
+func (s *preinstallSuite) TestPreinstallActionFailUnwrap(c *C) {
+	action := &secboot.PreinstallAction{
+		Action: string(sb_preinstall.ActionReboot),
+	}
+	failUnwrap := true
+	s.testPreinstallCheckAndAction(c, action, false, failUnwrap)
+}
+
+func (s *preinstallSuite) TestCheckResultErrorNotAvailable(c *C) {
+	detectErrors := false // warnings and no errors
+	checkContext := s.testPreinstallCheckAndAction(c, nil, detectErrors, false)
+	checkResult, err := checkContext.CheckResult()
+	c.Assert(err, ErrorMatches, "preinstall check result unavailable: 0 unresolved errors")
+	c.Assert(checkResult, IsNil)
+}
+
+func (s *preinstallSuite) TestSave(c *C) {
+	savePath := filepath.Join(c.MkDir(), "/make-this/preinstall-check-result")
+
+	sbCheckResult := &sb_preinstall.CheckResult{
+		PCRAlg: tpm2.HashAlgorithmSHA256,
+		Flags:  sb_preinstall.InsufficientDMAProtectionDetected,
+		Warnings: &CompoundPreinstallCheckError{
+			[]error{
+				errors.New("warning 1"),
+				errors.New("warning 2"),
+			},
+		},
+	}
+	checkResult := secboot.EmbedSbCheckResult(sbCheckResult)
+
+	err := checkResult.Save(savePath)
+	c.Assert(err, IsNil)
+
+	info, err := os.Stat(filepath.Dir(savePath))
+	c.Assert(err, IsNil)
+	c.Assert(info.Mode().Perm(), Equals, os.FileMode(0755))
+
+	info, err = os.Stat(savePath)
+	c.Assert(err, IsNil)
+	c.Assert(info.Mode().Perm(), Equals, os.FileMode(0600))
+
+	dataFromFile, err := os.ReadFile(savePath)
+	c.Assert(err, IsNil)
+	c.Assert(dataFromFile, HasLen, 97)
+
+	dataExpected, err := sbCheckResult.MarshalJSON()
+	c.Assert(err, IsNil)
+	c.Assert(dataFromFile, DeepEquals, dataExpected)
+
+	var sbCheckResultFromFile *sb_preinstall.CheckResult
+	err = json.Unmarshal(dataFromFile, &sbCheckResultFromFile)
+	c.Assert(err, IsNil)
+
+	// PCRAlg is required
+	c.Assert(sbCheckResultFromFile.PCRAlg, DeepEquals, sbCheckResult.PCRAlg)
+
+	// UsedSecureBootCAs is required
+	c.Assert(sbCheckResultFromFile.UsedSecureBootCAs, DeepEquals, sbCheckResult.UsedSecureBootCAs)
+
+	// Flags is required
+	c.Assert(sbCheckResultFromFile.Flags, Equals, sbCheckResult.Flags)
+
+	// Warnings is expected to be dropped during marshalling
+	c.Assert(sbCheckResultFromFile.Warnings, Not(DeepEquals), sbCheckResult.Warnings)
 }

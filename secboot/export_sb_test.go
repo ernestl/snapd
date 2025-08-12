@@ -46,6 +46,19 @@ var (
 	LockTPMSealedKeys    = lockTPMSealedKeys
 )
 
+func ExtractSbCheckContext(checkContext *PreinstallCheckContext) *sb_preinstall.RunChecksContext {
+	return checkContext.sbRunChecksContext
+}
+
+func ExtractSbCheckResult(checkResult *PreinstallCheckResult) *sb_preinstall.CheckResult {
+	return checkResult.sbCheckResult
+
+}
+
+func EmbedSbCheckResult(sbCheckResult *sb_preinstall.CheckResult) *PreinstallCheckResult {
+	return &PreinstallCheckResult{sbCheckResult: sbCheckResult}
+}
+
 func MockSbPreinstallNewRunChecksContext(f func(initialFlags sb_preinstall.CheckFlags, loadedImages []sb_efi.Image, profileOpts sb_preinstall.PCRProfileOptionsFlags) *sb_preinstall.RunChecksContext) (restore func()) {
 	old := sbPreinstallNewRunChecksContext
 	sbPreinstallNewRunChecksContext = f
