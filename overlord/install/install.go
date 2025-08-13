@@ -89,12 +89,36 @@ type EncryptionSupportInfo struct {
 	// availability errors identified during preinstall check.
 	AvailabilityCheckErrors []secboot.PreinstallErrorDetails
 
+	// availabilityCheckContext holds the configuration and state captured during
+	// the preinstall check. It is required for performing follow-up checks with
+	// actions to resolve identified errors. It is also an indicator that the
+	// preinstall check was used instead of the general availability check.
+	availabilityCheckContext *secboot.PreinstallCheckContext
+
 	// PassphraseAuthAvailable is set if the passphrase authentication
 	// is supported.
 	PassphraseAuthAvailable bool
 
 	// PINAuthAvailable is set if the pin authentication is supported.
 	PINAuthAvailable bool
+}
+
+// CheckContext returns the underlying preinstall check context. If not
+// available, it returns an internal error.
+func (esi *EncryptionSupportInfo) CheckContext() (*secboot.PreinstallCheckContext, error) {
+	if esi.availabilityCheckContext == nil {
+		return nil, fmt.Errorf("internal error: preinstall check context unavailable")
+	}
+	return esi.availabilityCheckContext, nil
+}
+
+// CheckResult returns the result of the preinstall check. If the underlying
+// preinstall check context  is not available, it returns an internal error.
+func (esi *EncryptionSupportInfo) CheckResult() (*secboot.PreinstallCheckResult, error) {
+	if esi.availabilityCheckContext == nil {
+		return nil, fmt.Errorf("internal error: preinstall check context unavailable")
+	}
+	return esi.availabilityCheckContext.CheckResult()
 }
 
 // ComponentSeedInfo contains information for a component from the seed and
@@ -124,6 +148,7 @@ var (
 
 	secbootCheckTPMKeySealingSupported = secboot.CheckTPMKeySealingSupported
 	secbootPreinstallCheck             = secboot.PreinstallCheck
+	secbootPreinstallCheckAction       = (*secboot.PreinstallCheckContext).PreinstallCheckAction
 	secbootFDEOpteeTAPresent           = secboot.FDEOpteeTAPresent
 	preinstallCheckTimeout             = 2 * time.Minute
 
@@ -186,7 +211,7 @@ func MockSecbootCheckTPMKeySealingSupported(f func(tpmMode secboot.TPMProvisionM
 }
 
 // MockSecbootPreinstallCheck mocks secboot.PreinstallCheck usage by the package for testing.
-func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
+func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error)) (restore func()) {
 	osutil.MustBeTestBinary("secbootPreinstallCheck only can be mocked in tests")
 	old := secbootPreinstallCheck
 	secbootPreinstallCheck = f
@@ -230,6 +255,8 @@ type EncryptionConstraints struct {
 	Gadget        *gadget.Info
 	TPMMode       secboot.TPMProvisionMode
 	SnapdVersions SystemSnapdVersions
+	CheckContext  *secboot.PreinstallCheckContext
+	CheckAction   *secboot.PreinstallAction
 }
 
 // GetEncryptionSupportInfo returns the encryption support information
@@ -273,7 +300,12 @@ func GetEncryptionSupportInfo(constraints EncryptionConstraints, runSetupHook fd
 	case checkOPTEEEncryption:
 		res.Type = device.EncryptionTypeLUKS
 	case checkSecbootEncryption:
-		unavailableReason, preinstallErrorDetails, err := encryptionAvailabilityCheck(constraints.Model, constraints.TPMMode)
+		preinstallCheckContext, unavailableReason, preinstallErrorDetails, err := encryptionAvailabilityCheck(
+			constraints.CheckContext,
+			constraints.CheckAction,
+			constraints.Model,
+			constraints.TPMMode,
+		)
 		if err != nil {
 			return res, fmt.Errorf("internal error: cannot perform secboot encryption check: %v", err)
 		}
@@ -284,6 +316,7 @@ func GetEncryptionSupportInfo(constraints EncryptionConstraints, runSetupHook fd
 			checkEncryptionErr = errors.New(unavailableReason)
 			res.AvailabilityCheckErrors = preinstallErrorDetails
 		}
+		res.availabilityCheckContext = preinstallCheckContext
 	default:
 		return res, fmt.Errorf("internal error: no encryption checked in encryptionSupportInfo")
 	}
@@ -335,44 +368,65 @@ func GetEncryptionSupportInfo(constraints EncryptionConstraints, runSetupHook fd
 	return res, nil
 }
 
-func encryptionAvailabilityCheck(model *asserts.Model, tpmMode secboot.TPMProvisionMode) (string, []secboot.PreinstallErrorDetails, error) {
+func encryptionAvailabilityCheck(
+	checkContext *secboot.PreinstallCheckContext,
+	checkAction *secboot.PreinstallAction,
+	model *asserts.Model,
+	tpmMode secboot.TPMProvisionMode,
+) (*secboot.PreinstallCheckContext, string, []secboot.PreinstallErrorDetails, error) {
 	supported, err := preinstallCheckSupportedWithEnvFallback(model)
 	if err != nil {
-		return "", nil, fmt.Errorf("cannot confirm preinstall check support: %v", err)
+		return nil, "", nil, fmt.Errorf("cannot confirm preinstall check support: %v", err)
 	}
 	if supported {
 		// use comprehensive preinstall check
 		images, err := orderedCurrentBootImages(model)
 		if err != nil {
-			return "", nil, fmt.Errorf("cannot locate ordered current boot images: %v", err)
+			return nil, "", nil, fmt.Errorf("cannot locate ordered current boot images: %v", err)
+		}
+
+		if checkAction != nil && checkContext == nil {
+			return nil, "", nil, errors.New("cannot use preinstall check action without context")
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), preinstallCheckTimeout)
 		defer cancel()
-		preinstallErrorDetails, err := secbootPreinstallCheck(ctx, images)
+
+		var (
+			preinstallErrorDetails []secboot.PreinstallErrorDetails
+			newCheckContext        *secboot.PreinstallCheckContext
+		)
+
+		if checkContext != nil {
+			newCheckContext = checkContext
+			preinstallErrorDetails, err = secbootPreinstallCheckAction(newCheckContext, ctx, checkAction)
+		} else {
+			newCheckContext, preinstallErrorDetails, err = secbootPreinstallCheck(ctx, images)
+		}
+
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return "", nil, fmt.Errorf("preinstall check timed out: %v", err)
+				return nil, "", nil, fmt.Errorf("preinstall check timed out: %v", err)
 			}
-			return "", nil, err
+			return nil, "", nil, err
 		}
 
 		switch len(preinstallErrorDetails) {
 		case 0:
-			return "", nil, nil
+			return newCheckContext, "", nil, nil
 		case 1:
-			return preinstallErrorDetails[0].Message, preinstallErrorDetails, nil
+			return newCheckContext, preinstallErrorDetails[0].Message, preinstallErrorDetails, nil
 		default:
-			return fmt.Sprintf("preinstall check identified %d errors", len(preinstallErrorDetails)), preinstallErrorDetails, nil
+			return newCheckContext, fmt.Sprintf("preinstall check identified %d errors", len(preinstallErrorDetails)), preinstallErrorDetails, nil
 		}
 	}
 
 	// use general availability check
 	err = secbootCheckTPMKeySealingSupported(tpmMode)
 	if err != nil {
-		return err.Error(), nil, nil
+		return nil, err.Error(), nil, nil
 	}
-	return "", nil, nil
+	return nil, "", nil, nil
 }
 
 func preinstallCheckSupportedWithEnvFallback(model *asserts.Model) (bool, error) {
@@ -524,8 +578,11 @@ func BuildInstallObserver(model *asserts.Model, gadgetDir string, useEncryption 
 // It is the responsibility of the caller to call
 // ObserveExistingTrustedRecoveryAssets on trustedInstallObserver.
 func PrepareEncryptedSystemData(
-	model *asserts.Model, installKeyForRole map[string]secboot.BootstrappedContainer,
-	volumesAuth *device.VolumesAuthOptions, trustedInstallObserver boot.TrustedAssetsInstallObserver,
+	model *asserts.Model,
+	installKeyForRole map[string]secboot.BootstrappedContainer,
+	volumesAuth *device.VolumesAuthOptions,
+	checkResult *secboot.PreinstallCheckResult,
+	trustedInstallObserver boot.TrustedAssetsInstallObserver,
 ) error {
 	// validity check
 	if len(installKeyForRole) == 0 || installKeyForRole[gadget.SystemData] == nil || installKeyForRole[gadget.SystemSave] == nil {
@@ -583,6 +640,13 @@ func PrepareEncryptedSystemData(
 			}
 		}
 	}
+
+	if checkResult == nil {
+		// write check result containing information required
+		// for optimum PCR configuration and resealing
+		savePreinstallCheckResult(model, checkResult)
+	}
+
 	// write markers containing a secret to pair data and save
 	if err := writeMarkers(model); err != nil {
 		return err
@@ -592,6 +656,16 @@ func PrepareEncryptedSystemData(
 	trustedInstallObserver.SetEncryptionParams(dataBootstrappedContainer, saveBootstrappedContainer, primaryKey, volumesAuth)
 
 	return nil
+}
+
+func savePreinstallCheckResult(model *asserts.Model, checkResult *secboot.PreinstallCheckResult) error {
+	saveCheckResultPath := device.PreinstallCheckResultUnder(boot.InstallHostFDEDataDir(model))
+
+	if err := os.MkdirAll(filepath.Dir(saveCheckResultPath), 0755); err != nil {
+		return err
+	}
+
+	return checkResult.Save(saveCheckResultPath)
 }
 
 // writeMarkers writes markers containing the same secret to pair data and save.
