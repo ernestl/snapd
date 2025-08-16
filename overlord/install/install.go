@@ -641,7 +641,7 @@ func PrepareEncryptedSystemData(
 		}
 	}
 
-	if checkResult == nil {
+	if checkResult != nil {
 		// write check result containing information required
 		// for optimum PCR configuration and resealing
 		savePreinstallCheckResult(model, checkResult)
