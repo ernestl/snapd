@@ -50,11 +50,6 @@ func ExtractSbCheckContext(checkContext *PreinstallCheckContext) *sb_preinstall.
 	return checkContext.sbRunChecksContext
 }
 
-func ExtractSbCheckResult(checkResult *PreinstallCheckResult) *sb_preinstall.CheckResult {
-	return checkResult.sbCheckResult
-
-}
-
 func EmbedSbCheckResult(sbCheckResult *sb_preinstall.CheckResult) *PreinstallCheckResult {
 	return &PreinstallCheckResult{sbCheckResult: sbCheckResult}
 }

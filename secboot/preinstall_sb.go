@@ -88,6 +88,9 @@ func PreinstallCheck(ctx context.Context, bootImagePaths []string) (*PreinstallC
 	result, err := sbPreinstallRunChecks(checkContext.sbRunChecksContext, ctx, sb_preinstall.ActionNone)
 	if err != nil {
 		errorDetails, err := unwrapPreinstallCheckError(err)
+		if err != nil {
+			return nil, errorDetails, err
+		}
 		return checkContext, errorDetails, err
 	}
 

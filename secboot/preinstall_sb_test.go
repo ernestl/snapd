@@ -359,7 +359,8 @@ func (s *preinstallSuite) testPreinstallCheckAndAction(c *C, checkAction *secboo
 						),
 					},
 				}
-			} else if failUnwrap {
+				// if we test with an action then only fail when called from PreinstallCheckAction to avoid nil context
+			} else if failUnwrap && (checkAction == nil || expectedAction != sb_preinstall.ActionNone) {
 				return nil, sb_preinstall.ErrInsufficientDMAProtection
 			} else {
 				return &sb_preinstall.CheckResult{
@@ -379,7 +380,11 @@ func (s *preinstallSuite) testPreinstallCheckAndAction(c *C, checkAction *secboo
 
 	// test PreinstallCheck
 	checkContext, errorDetails, err := secboot.PreinstallCheck(context.Background(), bootImagePaths)
-	c.Assert(secboot.ExtractSbCheckContext(checkContext), Equals, expectedRunCheckContext)
+	if failUnwrap && checkAction == nil {
+		c.Assert(checkContext, IsNil)
+	} else {
+		c.Assert(secboot.ExtractSbCheckContext(checkContext), Equals, expectedRunCheckContext)
+	}
 
 	// inputs: err, errorDetails, logbuf, detectedErrors, failUnwrap
 	assertCheckOutcome := func() {
@@ -406,7 +411,7 @@ func (s *preinstallSuite) testPreinstallCheckAndAction(c *C, checkAction *secboo
 					Actions: []string{"reboot-to-fw-settings"},
 				},
 			})
-		} else if failUnwrap {
+		} else if failUnwrap && (checkAction == nil || expectedAction != sb_preinstall.ActionNone) {
 			c.Assert(err, ErrorMatches, `cannot unwrap error of unexpected type \*errors\.errorString \(the platform firmware indicates that DMA protections are insufficient\)`)
 			c.Assert(errorDetails, IsNil)
 		} else {
