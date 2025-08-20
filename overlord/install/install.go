@@ -201,6 +201,12 @@ func BuildKernelBootInfo(kernInfo *snap.Info, compSeedInfos []ComponentSeedInfo,
 	}
 }
 
+// SetAvailabilityCheckContext is a test only helper to populate EncryptionSupportInfo field availabilityCheckContext.
+func (esi *EncryptionSupportInfo) SetAvailabilityCheckContext(checkContext *secboot.PreinstallCheckContext) {
+	osutil.MustBeTestBinary("secbootPreinstallCheck can only be mocked in tests")
+	esi.availabilityCheckContext = checkContext
+}
+
 // MockSecbootCheckTPMKeySealingSupported mocks secboot.CheckTPMKeySealingSupported usage by the package for testing.
 func MockSecbootCheckTPMKeySealingSupported(f func(tpmMode secboot.TPMProvisionMode) error) (restore func()) {
 	old := secbootCheckTPMKeySealingSupported
@@ -212,11 +218,21 @@ func MockSecbootCheckTPMKeySealingSupported(f func(tpmMode secboot.TPMProvisionM
 
 // MockSecbootPreinstallCheck mocks secboot.PreinstallCheck usage by the package for testing.
 func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error)) (restore func()) {
-	osutil.MustBeTestBinary("secbootPreinstallCheck only can be mocked in tests")
+	osutil.MustBeTestBinary("secbootPreinstallCheck can only be mocked in tests")
 	old := secbootPreinstallCheck
 	secbootPreinstallCheck = f
 	return func() {
 		secbootPreinstallCheck = old
+	}
+}
+
+// MockSecbootPreinstallCheckAction mocks secboot.PreinstallCheckAction usage by the package for testing.
+func MockSecbootPreinstallCheckAction(f func(c *secboot.PreinstallCheckContext, ctx context.Context, action *secboot.PreinstallAction) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
+	osutil.MustBeTestBinary("secbootPreinstallCheckAction can only be mocked in tests")
+	old := secbootPreinstallCheckAction
+	secbootPreinstallCheckAction = f
+	return func() {
+		secbootPreinstallCheckAction = old
 	}
 }
 
@@ -398,8 +414,8 @@ func encryptionAvailabilityCheck(
 		)
 
 		if checkContext != nil {
+			preinstallErrorDetails, err = secbootPreinstallCheckAction(checkContext, ctx, checkAction)
 			newCheckContext = checkContext
-			preinstallErrorDetails, err = secbootPreinstallCheckAction(newCheckContext, ctx, checkAction)
 		} else {
 			newCheckContext, preinstallErrorDetails, err = secbootPreinstallCheck(ctx, images)
 		}

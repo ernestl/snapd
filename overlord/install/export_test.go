@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/snapcore/snapd/asserts"
-	"github.com/snapcore/snapd/secboot"
 	"github.com/snapcore/snapd/sysconfig"
 	"github.com/snapcore/snapd/testutil"
 )
@@ -35,10 +34,6 @@ var (
 	CheckFDEFeatures                        = checkFDEFeatures
 	PreinstallCheckSupportedWithEnvFallback = preinstallCheckSupportedWithEnvFallback
 )
-
-func (esi *EncryptionSupportInfo) SetAvailabilityCheckContext(checkContext *secboot.PreinstallCheckContext) {
-	esi.availabilityCheckContext = checkContext
-}
 
 func MockPreinstallCheckTimeout(tm time.Duration) (restore func()) {
 	old := preinstallCheckTimeout
