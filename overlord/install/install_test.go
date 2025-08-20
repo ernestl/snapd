@@ -225,6 +225,7 @@ const (
 	// encryptionAvailabilityCheck errors (unexpected behavior)
 	ErrorCheckSupported    // preinstallCheckSupported error
 	ErrorBootImages        // orderedCurrentBootImages error
+	ErrorActionNoContext   // action requested without context
 	ErrorSecbootPreinstall // secboot.PreinstallCheck error
 	ErrorSecbootTimeout    // secboot.PreinstallCheck context timeout
 )
@@ -397,6 +398,58 @@ func (s *installSuite) TestOrderedCurrentBootImages(c *C) {
 	}
 }
 
+func (s *installSuite) TestCheckContext(c *C) {
+	expectedCheckContext := &secboot.PreinstallCheckContext{}
+
+	// error check context unavailable
+	encSupportInfo := install.EncryptionSupportInfo{}
+	checkContext, err := encSupportInfo.CheckContext()
+	c.Assert(checkContext, IsNil)
+	c.Assert(err, ErrorMatches, "internal error: preinstall check context unavailable")
+
+	// happy
+	encSupportInfo.SetAvailabilityCheckContext(expectedCheckContext)
+	checkContext, err = encSupportInfo.CheckContext()
+	c.Assert(checkContext, Equals, expectedCheckContext)
+	c.Assert(err, IsNil)
+}
+
+func (s *installSuite) TestCheckResult(c *C) {
+	expectedCheckContext := &secboot.PreinstallCheckContext{}
+	expectedCheckResult := &secboot.PreinstallCheckResult{}
+
+	// error check context unavailable
+	encSupportInfo := install.EncryptionSupportInfo{}
+	checkResult, err := encSupportInfo.CheckResult()
+	c.Assert(checkResult, IsNil)
+	c.Assert(err, ErrorMatches, "internal error: preinstall check context unavailable")
+
+	// error in secboot.CheckResult
+	encSupportInfo.SetAvailabilityCheckContext(expectedCheckContext)
+	restore := install.MockSecbootCheckResult(func(pcc *secboot.PreinstallCheckContext) (*secboot.PreinstallCheckResult, error) {
+		c.Assert(pcc, Equals, expectedCheckContext)
+		return nil, errors.New("error")
+
+	})
+	defer restore()
+
+	checkResult, err = encSupportInfo.CheckResult()
+	c.Assert(checkResult, IsNil)
+	c.Assert(err, ErrorMatches, "error")
+
+	// happy
+	restore = install.MockSecbootCheckResult(func(pcc *secboot.PreinstallCheckContext) (*secboot.PreinstallCheckResult, error) {
+		c.Assert(pcc, Equals, expectedCheckContext)
+		// cannot modify the check result within check context so fake it
+		return expectedCheckResult, nil
+	})
+	defer restore()
+
+	checkResult, err = encSupportInfo.CheckResult()
+	c.Assert(err, IsNil)
+	c.Assert(checkResult, Equals, expectedCheckResult)
+}
+
 func (s *installSuite) TestPreinstallCheckSupported(c *C) {
 	logbuf, restore := logger.MockLogger()
 	s.AddCleanup(restore)
@@ -538,6 +591,15 @@ var preinstallErrorDetails = []secboot.PreinstallErrorDetails{
 // preinstall check context returned by preinstall check
 var preinstallCheckContext = &secboot.PreinstallCheckContext{}
 
+// representative preinstall action
+var preinstallAction = &secboot.PreinstallAction{
+	Action: "SecbootAction",
+	Args: map[string]json.RawMessage{
+		"arg1": json.RawMessage(`1`),
+		"argn": json.RawMessage(`"n"`),
+	},
+}
+
 // mockHelperForEncryptionAvailabilityCheck simplifies mocking that is required to exercise all core parts of encryptionAvailabilityCheck.
 //
 // isSupportedUbuntuHybrid: modify model, system release information and place current boot images to simulate supported Ubuntu hybrid install
@@ -592,7 +654,7 @@ func (s *installSuite) mockHelperForEncryptionAvailabilityCheck(c *C, isSupporte
 	}
 
 	// mock secboot.PreinstallCheck for Supported Ubuntu hybrid systems
-	restore1 := install.MockSecbootPreinstallCheck(func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error) {
+	restore := install.MockSecbootPreinstallCheck(func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error) {
 		c.Assert(ctx, NotNil)
 		c.Assert(isSupportedUbuntuHybrid, Equals, true)
 		c.Assert(bootImagePaths, HasLen, len(relBootImagePaths))
@@ -613,6 +675,8 @@ func (s *installSuite) mockHelperForEncryptionAvailabilityCheck(c *C, isSupporte
 		}
 
 		switch errorsDetected {
+		case ErrorActionNoContext:
+			fallthrough
 		case ErrorNone:
 			return preinstallCheckContext, nil, nil
 		case ErrorsDetectedSingle:
@@ -624,10 +688,45 @@ func (s *installSuite) mockHelperForEncryptionAvailabilityCheck(c *C, isSupporte
 			return nil, nil, fmt.Errorf("test error")
 		}
 	})
-	s.AddCleanup(restore1)
+	s.AddCleanup(restore)
 
-	// mock Secboot.CheckTPMKeySealingSupported for other systems (Ubuntu Core)
-	restore2 := install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
+	// mock secboot.PreinstallCheckAction for Supported Ubuntu hybrid systems
+	restore = install.MockSecbootPreinstallCheckAction(
+		func(pcc *secboot.PreinstallCheckContext, ctx context.Context, action *secboot.PreinstallAction) ([]secboot.PreinstallErrorDetails, error) {
+			c.Assert(pcc, NotNil)
+			c.Assert(ctx, NotNil)
+			c.Assert(action, DeepEquals, preinstallAction)
+			c.Assert(isSupportedUbuntuHybrid, Equals, true)
+
+			if checkFailErrors == ErrorSecbootPreinstall {
+				return nil, fmt.Errorf("compound error does not wrap any error")
+			}
+
+			if checkFailErrors == ErrorSecbootTimeout {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+
+			switch errorsDetected {
+			case ErrorNone:
+				return nil, nil
+			case ErrorsDetectedSingle:
+				return preinstallErrorDetails[:1], nil
+			case ErrorsDetectedCompound:
+				return preinstallErrorDetails, nil
+			default:
+				c.Assert(false, Equals, true)
+				return nil, fmt.Errorf("test error")
+			}
+
+		})
+	s.AddCleanup(restore)
+
+	// mock secboot.CheckTPMKeySealingSupported for other systems (Ubuntu Core)
+	restore = install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
 		c.Assert(tpmMode, Equals, secboot.TPMProvisionFull)
 
 		switch errorsDetected {
@@ -642,7 +741,7 @@ func (s *installSuite) mockHelperForEncryptionAvailabilityCheck(c *C, isSupporte
 			return fmt.Errorf("test error")
 		}
 	})
-	s.AddCleanup(restore2)
+	s.AddCleanup(restore)
 
 	return s.mockModel(extendedModelMods)
 }
@@ -653,6 +752,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 		detectedErrors          ErrorsDetected
 		checkFailErrors         ErrorsDetected
 
+		expectedCheckContext      *secboot.PreinstallCheckContext
 		expectedUnavailableReason string
 		expectedErrorDetails      []secboot.PreinstallErrorDetails
 		expectedError             string
@@ -661,6 +761,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			true,
 			ErrorNone,
 			ErrorNone,
+			preinstallCheckContext,
 			"",
 			nil,
 			"",
@@ -669,6 +770,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			true,
 			ErrorsDetectedCompound,
 			ErrorNone,
+			preinstallCheckContext,
 			"preinstall check identified 2 errors",
 			preinstallErrorDetails,
 			"",
@@ -677,6 +779,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			false,
 			ErrorNone,
 			ErrorNone,
+			nil,
 			"",
 			nil,
 			"",
@@ -685,6 +788,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			false,
 			ErrorsDetectedSingle,
 			ErrorNone,
+			nil,
 			"cannot connect to TPM device",
 			nil,
 			"",
@@ -693,6 +797,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			true,
 			ErrorNone,
 			ErrorCheckSupported,
+			nil,
 			"",
 			nil,
 			`cannot confirm preinstall check support: cannot perform version comparison with OS release version ID: invalid version "25:10"`,
@@ -701,6 +806,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			true,
 			ErrorNone,
 			ErrorBootImages,
+			nil,
 			"",
 			nil,
 			`cannot locate ordered current boot images: cannot locate hybrid system boot images: cannot locate installer shim using globbing pattern ".*/boot\*.efi"`,
@@ -708,7 +814,17 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 		{
 			true,
 			ErrorNone,
+			ErrorActionNoContext, // only applicable to preinstall check action
+			preinstallCheckContext,
+			"",
+			nil,
+			"",
+		},
+		{
+			true,
+			ErrorNone,
 			ErrorSecbootPreinstall,
+			nil,
 			"",
 			nil,
 			"compound error does not wrap any error",
@@ -717,6 +833,7 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 			true,
 			ErrorNone,
 			ErrorSecbootTimeout,
+			nil,
 			"",
 			nil,
 			"preinstall check timed out: context deadline exceeded",
@@ -724,24 +841,40 @@ func (s *installSuite) TestEncryptionAvailabilityCheck(c *C) {
 	} {
 		mockModel := s.mockHelperForEncryptionAvailabilityCheck(c, tc.isSupportedUbuntuHybrid, tc.detectedErrors, tc.checkFailErrors, nil)
 
-		// XXX: need to be input from the test
-		/*checkContext := &secboot.PreinstallCheckContext{}
-		checkAction := &secboot.PreinstallAction{
-			Action: string(sb_preinstall.ActionNone)
-		}*/
-
+		// exercise secboot.PreinstallCheck
 		newCheckContext, unavailableReason, errorDetails, err := install.EncryptionAvailabilityCheck(nil, nil, mockModel, secboot.TPMProvisionFull)
+		c.Assert(newCheckContext, Equals, tc.expectedCheckContext)
 		c.Assert(unavailableReason, Equals, tc.expectedUnavailableReason)
 		c.Assert(errorDetails, DeepEquals, tc.expectedErrorDetails)
 
-		if tc.expectedError != "" {
-			c.Assert(newCheckContext, IsNil)
-			c.Assert(err, ErrorMatches, tc.expectedError)
-		} else {
-			if tc.isSupportedUbuntuHybrid {
-				c.Assert(newCheckContext, NotNil)
+		checkError := func() {
+			if tc.expectedError != "" {
+				c.Assert(err, ErrorMatches, tc.expectedError)
+			} else {
+				c.Assert(err, IsNil)
 			}
-			c.Assert(err, IsNil)
+		}
+		checkError()
+
+		// exercise secboot.PreinstallCheckAction
+		newCheckContext, unavailableReason, errorDetails, err = install.EncryptionAvailabilityCheck(
+			preinstallCheckContext, preinstallAction, mockModel, secboot.TPMProvisionFull,
+		)
+		c.Assert(newCheckContext, Equals, tc.expectedCheckContext)
+		c.Assert(unavailableReason, Equals, tc.expectedUnavailableReason)
+		c.Assert(errorDetails, DeepEquals, tc.expectedErrorDetails)
+		checkError()
+
+		if tc.checkFailErrors == ErrorActionNoContext {
+			// exercise secboot.PreinstallCheckAction with action without context
+			newCheckContext, unavailableReason, errorDetails, err = install.EncryptionAvailabilityCheck(
+				nil, preinstallAction, mockModel, secboot.TPMProvisionFull,
+			)
+			c.Assert(newCheckContext, IsNil)
+			c.Assert(unavailableReason, Equals, tc.expectedUnavailableReason)
+			c.Assert(errorDetails, DeepEquals, tc.expectedErrorDetails)
+			c.Assert(err, ErrorMatches, "cannot use preinstall check action without context")
+
 		}
 	}
 }
@@ -765,7 +898,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"dangerous", "", "", "", false, ErrorsDetectedSingle,
@@ -775,7 +907,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				Type:               device.EncryptionTypeNone,
 				UnavailableWarning: "not encrypting device storage as checking TPM gave: cannot connect to TPM device",
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"dangerous", "encrypted", "", "", true, ErrorNone,
@@ -803,7 +934,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				// Note that encryption type is set to what is available
 				Type: device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"signed", "", "", "", true, ErrorNone,
@@ -830,7 +960,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				StorageSafety: asserts.StorageSafetyEncrypted,
 				Type:          device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"signed", "prefer-unencrypted", "", "", true, ErrorNone,
@@ -849,7 +978,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				Type:           device.EncryptionTypeNone,
 				UnavailableErr: fmt.Errorf("cannot encrypt device storage as mandated by encrypted storage-safety model option: cannot connect to TPM device"),
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"secured", "encrypted", "", "", true, ErrorNone,
@@ -876,7 +1004,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				StorageSafety: asserts.StorageSafetyEncrypted,
 				Type:          device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"secured", "", "", "", false, ErrorsDetectedSingle,
@@ -886,7 +1013,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				Type:           device.EncryptionTypeNone,
 				UnavailableErr: fmt.Errorf("cannot encrypt device storage as mandated by model grade secured: cannot connect to TPM device"),
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		},
 		// Passphrase support requires snapd 2.68+
@@ -898,7 +1024,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				Type:                    device.EncryptionTypeLUKS,
 				PassphraseAuthAvailable: true,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"secured", "encrypted", "2.69", "2.69", true, ErrorNone,
@@ -917,7 +1042,6 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 				Type:                    device.EncryptionTypeLUKS,
 				PassphraseAuthAvailable: false,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"secured", "encrypted", "2.68", "2.67", true, ErrorNone,
@@ -947,11 +1071,21 @@ func (s *installSuite) TestEncryptionSupportInfoWithTPM(c *C) {
 			Gadget:        gadgetInfo,
 			TPMMode:       secboot.TPMProvisionFull,
 			SnapdVersions: mockSystemSnapdVersions,
+			CheckContext:  nil,
+			CheckAction:   nil,
 		}
 
-		tc.expected.SetAvailabilityCheckContext(tc.expectedCheckContext)
-
+		// exercise secboot.PreinstallCheck
 		res, err := install.GetEncryptionSupportInfo(constraints, nil)
+		c.Assert(err, IsNil)
+		tc.expected.SetAvailabilityCheckContext(tc.expectedCheckContext)
+		c.Check(res, DeepEquals, tc.expected, Commentf("test index: %d | %v", i, tc))
+
+		constraints.CheckContext = preinstallCheckContext
+		constraints.CheckAction = preinstallAction
+
+		// exercise secboot.PreinstallCheckAction
+		res, err = install.GetEncryptionSupportInfo(constraints, nil)
 		c.Assert(err, IsNil)
 		c.Check(res, DeepEquals, tc.expected, Commentf("test index: %d | %v", i, tc))
 	}
@@ -1089,7 +1223,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"dangerous", "", "force-unencrypted", true, ErrorNone,
@@ -1102,7 +1235,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeNone,
 			},
-			// disabled
 			nil,
 		}, {
 			"dangerous", "", "force-unencrypted", false, ErrorsDetectedSingle,
@@ -1113,7 +1245,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeNone,
 			},
-			// disabled
 			nil,
 		}, {
 			"dangerous", "", "force-unencrypted", true, ErrorsDetectedCompound,
@@ -1124,7 +1255,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeNone,
 			},
-			// disabled
 			nil,
 		},
 		// not possible to disable encryption on non-dangerous devices
@@ -1135,7 +1265,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				StorageSafety: asserts.StorageSafetyPreferEncrypted,
 				Type:          device.EncryptionTypeLUKS,
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"signed", "", "force-unencrypted", true, ErrorNone,
@@ -1153,7 +1282,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				Type:               device.EncryptionTypeNone,
 				UnavailableWarning: "not encrypting device storage as checking TPM gave: cannot connect to TPM device",
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"signed", "", "force-unencrypted", true, ErrorsDetectedCompound,
@@ -1189,7 +1317,6 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 				Type:           device.EncryptionTypeNone,
 				UnavailableErr: fmt.Errorf("cannot encrypt device storage as mandated by model grade secured: cannot connect to TPM device"),
 			},
-			// not a supported Ubuntu hybrid
 			nil,
 		}, {
 			"secured", "", "force-unencrypted", true, ErrorsDetectedCompound,
@@ -1227,11 +1354,19 @@ func (s *installSuite) TestEncryptionSupportInfoForceUnencrypted(c *C) {
 			TPMMode: secboot.TPMProvisionFull,
 		}
 
-		tc.expected.SetAvailabilityCheckContext(tc.expectedCheckContext)
-
+		// exercise secboot.PreinstallCheck
 		res, err := install.GetEncryptionSupportInfo(constraints, nil)
 		c.Assert(err, IsNil)
+		tc.expected.SetAvailabilityCheckContext(tc.expectedCheckContext)
 		c.Assert(res, DeepEquals, tc.expected, Commentf("test index: %d | %v", i, tc))
+
+		constraints.CheckContext = preinstallCheckContext
+		constraints.CheckAction = preinstallAction
+
+		// exercise secboot.PreinstallCheckAction
+		res, err = install.GetEncryptionSupportInfo(constraints, nil)
+		c.Assert(err, IsNil)
+		c.Check(res, DeepEquals, tc.expected, Commentf("test index: %d | %v", i, tc))
 	}
 }
 
@@ -1265,12 +1400,7 @@ var gadgetUC20 = &gadget.Info{
 }
 
 func (s *installSuite) TestEncryptionSupportInfoGadgetIncompatibleWithEncryption(c *C) {
-	restore := install.MockSecbootPreinstallCheck(func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error) {
-		return nil, nil, nil
-	})
-	defer restore()
-
-	restore = install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
+	restore := install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
 		return nil
 	})
 	defer restore()
@@ -1439,12 +1569,25 @@ func (s *installSuite) TestInstallCheckEncryptionSupportTPM(c *C) {
 			TPMMode: secboot.TPMProvisionFull,
 		}
 
+		// exercise secboot.PreinstallCheck
 		encryptionType, err := install.CheckEncryptionSupport(constraints, nil)
 		c.Assert(err, IsNil)
 		c.Check(encryptionType, Equals, tc.encryptionType, Commentf("%v", tc))
 		if tc.detectedErrors != ErrorNone {
 			c.Check(logbuf.String(), Matches, ".*: not encrypting device storage as checking TPM gave: .+\n")
 		}
+		logbuf.Reset()
+
+		constraints.CheckContext = preinstallCheckContext
+		constraints.CheckAction = preinstallAction
+
+		// exercise secboot.PreinstallCheckAction
+		encryptionType, err = install.CheckEncryptionSupport(constraints, nil)
+		c.Assert(err, IsNil)
+		if tc.detectedErrors != ErrorNone {
+			c.Check(logbuf.String(), Matches, ".*: not encrypting device storage as checking TPM gave: .+\n")
+		}
+		c.Check(encryptionType, Equals, tc.encryptionType, Commentf("%v", tc))
 		logbuf.Reset()
 	}
 }
@@ -1457,28 +1600,22 @@ func (s *installSuite) TestInstallCheckEncryptionSupportHook(c *C) {
 	defer restore()
 
 	for _, tc := range []struct {
-		fdeSetupHookFeatures    string
-		hasTPM                  bool
-		isSupportedUbuntuHybrid bool
+		fdeSetupHookFeatures string
+		hasTPM               bool
 
 		encryptionType device.EncryptionType
 	}{
-		{"[]", false, false, device.EncryptionTypeLUKS},
-		{"[]", false, true, device.EncryptionTypeLUKS},
-		{"[]", true, false, device.EncryptionTypeLUKS},
-		{"[]", true, true, device.EncryptionTypeLUKS},
+		{"[]", false, device.EncryptionTypeLUKS},
+		{"[]", false, device.EncryptionTypeLUKS},
+		{"[]", true, device.EncryptionTypeLUKS},
+		{"[]", true, device.EncryptionTypeLUKS},
 	} {
-		detectedErrors := ErrorNone
-		if !tc.hasTPM {
-			detectedErrors = ErrorsDetectedSingle
-		}
-		mockModel := s.mockHelperForEncryptionAvailabilityCheck(c, tc.isSupportedUbuntuHybrid, detectedErrors, ErrorNone, nil)
-
 		runFDESetup := func(_ *fde.SetupRequest) ([]byte, error) {
 			return []byte(fmt.Sprintf(`{"features":%s}`, tc.fdeSetupHookFeatures)), nil
 		}
 
 		restore := install.MockSecbootCheckTPMKeySealingSupported(func(secboot.TPMProvisionMode) error {
+			panic("asd")
 			if tc.hasTPM {
 				return nil
 			}
@@ -1487,7 +1624,7 @@ func (s *installSuite) TestInstallCheckEncryptionSupportHook(c *C) {
 		defer restore()
 
 		constraints := install.EncryptionConstraints{
-			Model:   mockModel,
+			Model:   s.mockModel(nil),
 			Kernel:  kernelInfo,
 			Gadget:  gadgetInfo,
 			TPMMode: secboot.TPMProvisionFull,
@@ -1507,12 +1644,7 @@ func (s *installSuite) TestInstallCheckEncryptionSupportStorageSafety(c *C) {
 	kernelInfo := s.kernelSnap(c, "pc-kernel=20")
 	gadgetInfo, _ := s.mountedGadget(c)
 
-	restore := install.MockSecbootPreinstallCheck(func(ctx context.Context, bootImagePaths []string) (*secboot.PreinstallCheckContext, []secboot.PreinstallErrorDetails, error) {
-		return nil, nil, nil
-	})
-	defer restore()
-
-	restore = install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
+	restore := install.MockSecbootCheckTPMKeySealingSupported(func(tpmMode secboot.TPMProvisionMode) error {
 		return nil
 	})
 	defer restore()
@@ -1597,7 +1729,15 @@ func (s *installSuite) TestInstallCheckEncryptionSupportErrors(c *C) {
 			TPMMode: secboot.TPMProvisionFull,
 		}
 
+		// exercise secboot.PreinstallCheck
 		_, err := install.CheckEncryptionSupport(constraints, nil)
+		c.Check(err, ErrorMatches, tc.expectedErr, Commentf("%s %s", tc.grade, tc.storageSafety))
+
+		constraints.CheckContext = preinstallCheckContext
+		constraints.CheckAction = preinstallAction
+
+		// exercise secboot.PreinstallCheckAction
+		_, err = install.CheckEncryptionSupport(constraints, nil)
 		c.Check(err, ErrorMatches, tc.expectedErr, Commentf("%s %s", tc.grade, tc.storageSafety))
 	}
 }
@@ -1629,7 +1769,16 @@ func (s *installSuite) TestInstallCheckEncryptionSupportErrorsLogsTPM(c *C) {
 			TPMMode: secboot.TPMProvisionFull,
 		}
 
+		// exercise secboot.PreinstallCheck
 		_, err := install.CheckEncryptionSupport(constraints, nil)
+		c.Check(err, IsNil)
+		c.Check(logbuf.String(), Matches, "(?s).*: not encrypting device storage as checking TPM gave: .+\n")
+
+		constraints.CheckContext = preinstallCheckContext
+		constraints.CheckAction = preinstallAction
+
+		// exercise secboot.PreinstallCheckAction
+		_, err = install.CheckEncryptionSupport(constraints, nil)
 		c.Check(err, IsNil)
 		c.Check(logbuf.String(), Matches, "(?s).*: not encrypting device storage as checking TPM gave: .+\n")
 	}

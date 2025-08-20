@@ -113,12 +113,12 @@ func (esi *EncryptionSupportInfo) CheckContext() (*secboot.PreinstallCheckContex
 }
 
 // CheckResult returns the result of the preinstall check. If the underlying
-// preinstall check context  is not available, it returns an internal error.
+// preinstall check context is not available, it returns an internal error.
 func (esi *EncryptionSupportInfo) CheckResult() (*secboot.PreinstallCheckResult, error) {
 	if esi.availabilityCheckContext == nil {
 		return nil, fmt.Errorf("internal error: preinstall check context unavailable")
 	}
-	return esi.availabilityCheckContext.CheckResult()
+	return secbootCheckResult(esi.availabilityCheckContext)
 }
 
 // ComponentSeedInfo contains information for a component from the seed and
@@ -149,6 +149,7 @@ var (
 	secbootCheckTPMKeySealingSupported = secboot.CheckTPMKeySealingSupported
 	secbootPreinstallCheck             = secboot.PreinstallCheck
 	secbootPreinstallCheckAction       = (*secboot.PreinstallCheckContext).PreinstallCheckAction
+	secbootCheckResult                 = (*secboot.PreinstallCheckContext).CheckResult
 	secbootFDEOpteeTAPresent           = secboot.FDEOpteeTAPresent
 	preinstallCheckTimeout             = 2 * time.Minute
 
@@ -201,7 +202,7 @@ func BuildKernelBootInfo(kernInfo *snap.Info, compSeedInfos []ComponentSeedInfo,
 	}
 }
 
-// SetAvailabilityCheckContext is a test only helper to populate EncryptionSupportInfo field availabilityCheckContext.
+// SetAvailabilityCheckContext is a test only helper for populating EncryptionSupportInfo field availabilityCheckContext.
 func (esi *EncryptionSupportInfo) SetAvailabilityCheckContext(checkContext *secboot.PreinstallCheckContext) {
 	osutil.MustBeTestBinary("secbootPreinstallCheck can only be mocked in tests")
 	esi.availabilityCheckContext = checkContext
@@ -227,12 +228,22 @@ func MockSecbootPreinstallCheck(f func(ctx context.Context, bootImagePaths []str
 }
 
 // MockSecbootPreinstallCheckAction mocks secboot.PreinstallCheckAction usage by the package for testing.
-func MockSecbootPreinstallCheckAction(f func(c *secboot.PreinstallCheckContext, ctx context.Context, action *secboot.PreinstallAction) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
+func MockSecbootPreinstallCheckAction(f func(pcc *secboot.PreinstallCheckContext, ctx context.Context, action *secboot.PreinstallAction) ([]secboot.PreinstallErrorDetails, error)) (restore func()) {
 	osutil.MustBeTestBinary("secbootPreinstallCheckAction can only be mocked in tests")
 	old := secbootPreinstallCheckAction
 	secbootPreinstallCheckAction = f
 	return func() {
 		secbootPreinstallCheckAction = old
+	}
+}
+
+// MockSecbootCheckResult mocks secboot.CheckResult usage by the package for testing.
+func MockSecbootCheckResult(f func(pcc *secboot.PreinstallCheckContext) (*secboot.PreinstallCheckResult, error)) (restore func()) {
+	osutil.MustBeTestBinary("secbootCheckResult can only be mocked in tests")
+	old := secbootCheckResult
+	secbootCheckResult = f
+	return func() {
+		secbootCheckResult = old
 	}
 }
 
