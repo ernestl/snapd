@@ -32,33 +32,63 @@ import (
 
 	sb "github.com/snapcore/secboot"
 
+	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/systemd"
 )
 
 type systemdAuthRequestor struct {
 }
 
-func getAskPasswordMessage(authType sb.UserAuthType, name, path string) (string, error) {
-	var fmtMsg string
-	switch authType {
-	case sb.UserAuthTypePassphrase:
-		fmtMsg = "Enter passphrase for %[1]s (%[2]s):"
-	case sb.UserAuthTypePIN:
-		fmtMsg = "Enter PIN for %[1]s (%[2]s):"
-	case sb.UserAuthTypeRecoveryKey:
-		fmtMsg = "Enter recovery key for %[1]s (%[2]s):"
-	case sb.UserAuthTypePassphrase | sb.UserAuthTypePIN:
-		fmtMsg = "Enter passphrase or PIN for %[1]s (%[2]s):"
-	case sb.UserAuthTypePassphrase | sb.UserAuthTypeRecoveryKey:
-		fmtMsg = "Enter passphrase or recovery key for %[1]s (%[2]s):"
-	case sb.UserAuthTypePIN | sb.UserAuthTypeRecoveryKey:
-		fmtMsg = "Enter PIN or recovery key for %[1]s (%[2]s):"
-	case sb.UserAuthTypePassphrase | sb.UserAuthTypePIN | sb.UserAuthTypeRecoveryKey:
-		fmtMsg = "Enter passphrase, PIN or recovery key for %[1]s (%[2]s):"
-	default:
-		return "", errors.New("unexpected UserAuthType")
+func credentialOptions(authTypes sb.UserAuthType) (string, error) {
+	const knownTypes = sb.UserAuthTypePassphrase | sb.UserAuthTypePIN | sb.UserAuthTypeRecoveryKey
+
+	if authTypes == 0 {
+		return "", errors.New("user authorization type not specified")
 	}
-	return fmt.Sprintf(fmtMsg, name, path), nil
+
+	parts := make([]string, 0, 3)
+	if authTypes&sb.UserAuthTypePassphrase != 0 {
+		parts = append(parts, "passphrase")
+	}
+	if authTypes&sb.UserAuthTypePIN != 0 {
+		parts = append(parts, "PIN")
+	}
+	if authTypes&sb.UserAuthTypeRecoveryKey != 0 {
+		parts = append(parts, "recovery key")
+	}
+
+	unknownTypesPresent := authTypes&^knownTypes != 0
+
+	var options string
+	switch len(parts) {
+	case 0:
+		if unknownTypesPresent {
+			// only unknown type(s) present
+			return "", errors.New("cannot use unknown user authorization type")
+		}
+	case 1:
+		options = parts[0]
+	case 2:
+		options = parts[0] + " or " + parts[1]
+	default:
+		options = parts[0] + ", " + parts[1] + " or " + parts[2]
+	}
+
+	if unknownTypesPresent {
+		// known and unknown type(s) present
+		logger.Noticef("WARNING: detected unknown user authorization type")
+	}
+
+	return options, nil
+}
+
+func getAskPasswordMessage(authTypes sb.UserAuthType, name, path string) (string, error) {
+	options, err := credentialOptions(authTypes)
+	if err != nil {
+		return err
+	}
+
+	return fmt.Sprintf("Enter %s for %s (%s):", options, name, path), nil
 }
 
 // RequestUserCredential implements AuthRequestor.RequestUserCredential
