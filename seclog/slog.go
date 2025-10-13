@@ -129,3 +129,32 @@ func NewSlogLogger(writer io.Writer, appID string, level Level) Logger {
 	}
 	return logger
 }
+
+// slogProvider implements [Provider]
+type slogProvider struct{}
+
+// New constructs an slog based [Logger] that emits structured JSON to the
+// provided [io.Writer]. The returned logger enables dynamic level control
+// via an internal [slog.LevelVar].
+func (slogProvider) New(writer io.Writer, appID string, level Level) Logger {
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.Level(level))
+	handler := newJsonHandler(writer, levelVar)
+	logger := &SlogLogger{
+		// enable dynamic level adjustment
+		levelVar: levelVar,
+		// always include appid
+		logger: slog.New(handler).With("appid", appID),
+	}
+	return logger
+
+}
+
+// Impl returns the implementation.
+func (slogProvider) Impl() Impl {
+	return Slog
+}
+
+func init() {
+	Register(slogProvider{})
+}

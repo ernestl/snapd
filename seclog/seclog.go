@@ -21,15 +21,16 @@ package seclog
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	//"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
-	// initialize to noop logger
-	globalSecurityLogger Logger = NewNoopLogger(nil, "", 0)
-	lock                 sync.Mutex
+	providers           = map[Impl]Provider{}
+	globalLogger Logger = NewNopLogger()
+	lock         sync.Mutex
 )
 
 // Logger provides security logging.
@@ -38,11 +39,11 @@ type Logger interface {
 	LogLoginFailure(user string)
 }
 
-// A Level is the importance or severity of a log event.
+// Level is the importance or severity of a log event.
 // The higher the level, the more severe the event.
 type Level int
 
-// Level values
+// Log levels.
 const (
 	LevelDebug    Level = 1
 	LevelInfo     Level = 2
@@ -82,29 +83,65 @@ func (l Level) String() string {
 	}
 }
 
-// SetupSecurityLogger sets a new global security logger.
-func SetupSecurityLogger(appID string) {
-	setLogger(
-		NewSlogLogger(os.Stderr, appID, LevelInfo),
-	)
+// Impl represent a known logger implementation.
+type Impl string
+
+// Logger implementations.
+const (
+	Nop  Impl = "nop"
+	Slog Impl = "slog" // slog based structured logger
+)
+
+// Provider provides functions required for contructing a [Logger].
+// It is intended for registration of available loggers.
+type Provider interface {
+	New(writer io.Writer, appID string, level Level) Logger
+	Impl() Impl
+}
+
+// Register makes a provider available by name.
+// Should be called from init().
+func Register(provider Provider) {
+	lock.Lock()
+	defer lock.Unlock()
+	impl := provider.Impl()
+	if _, exists := providers[impl]; exists {
+		panic("attempting registration for existing logger " + impl)
+	}
+	providers[impl] = provider
+}
+
+// Setup sets a new global logger.
+func SetupLogger(impl Impl, appID string, level Level) {
+	lock.Lock()
+	defer lock.Unlock()
+	if provider, exists := providers[impl]; exists {
+		setLogger(provider.New(os.Stdout, appID, level))
+	}
+
+	if provider, exists := providers[Nop]; exists {
+		setLogger(provider.New(nil, "", 0))
+	} else {
+		panic("nop logger not registered")
+	}
 }
 
 func setLogger(l Logger) {
 	lock.Lock()
 	defer lock.Unlock()
-	globalSecurityLogger = l
+	globalLogger = l
 }
 
 // LogLoginSuccess using the current global security logger.
 func LogLoginSuccess(user string) {
 	lock.Lock()
 	defer lock.Unlock()
-	globalSecurityLogger.LogLoginSuccess(user)
+	globalLogger.LogLoginSuccess(user)
 }
 
 // LogLoginFailure using the current global security logger.
 func LogLoginFailure(user string) {
 	lock.Lock()
 	defer lock.Unlock()
-	globalSecurityLogger.LogLoginFailure(user)
+	globalLogger.LogLoginFailure(user)
 }

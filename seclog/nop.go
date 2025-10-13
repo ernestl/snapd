@@ -23,23 +23,40 @@ import (
 	"io"
 )
 
-// Ensure [NoopLogger] implements [Logger].
-var _ Logger = (*NoopLogger)(nil)
+// Ensure [NopLogger] implements [Logger].
+var _ Logger = (*NopLogger)(nil)
 
-// Noop logger provides a noop logger implementation.
-type NoopLogger struct{}
+// Nop logger provides a no-operation [Logger] implementation.
+type NopLogger struct{}
 
 // LogLoginSuccess implements [Logger.LogLoginSuccess].
-func (NoopLogger) LogLoginSuccess(user string) {
+func (NopLogger) LogLoginSuccess(user string) {
 }
 
 // LogLoginFailure implements [Logger.LogLoginFailure].
-func (NoopLogger) LogLoginFailure(user string) {
+func (NopLogger) LogLoginFailure(user string) {
 }
 
-// NewNoopLogger returns a new [NoopLogger]. Parameters are accepted for
-// API parity, but ignored.
-func NewNoopLogger(_ io.Writer, _ string, _ Level) Logger {
-	logger := &NoopLogger{}
+// NewNopLogger returns a new [NopLogger].
+func NewNopLogger() Logger {
+	logger := &NopLogger{}
 	return logger
+}
+
+// nopProvider implements [Provider]
+type nopProvider struct{}
+
+// New returns a nop [Logger].
+// Params are ignored.
+func (nopProvider) New(_ io.Writer, _ string, _ Level) Logger {
+	return NopLogger{}
+}
+
+// Impl returns the implementation.
+func (nopProvider) Impl() Impl {
+	return Nop
+}
+
+func init() {
+	Register(nopProvider{})
 }
