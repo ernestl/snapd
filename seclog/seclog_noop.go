@@ -18,3 +18,28 @@
  */
 
 package seclog
+
+import (
+	"io"
+)
+
+// Ensure [NoopLogger] implements [Logger].
+var _ Logger = (*NoopLogger)(nil)
+
+// Noop logger provides a noop logger implementation.
+type NoopLogger struct{}
+
+// LogLoginSuccess implements [Logger.LogLoginSuccess].
+func (NoopLogger) LogLoginSuccess(user string) {
+}
+
+// LogLoginFailure implements [Logger.LogLoginFailure].
+func (NoopLogger) LogLoginFailure(user string) {
+}
+
+// NewNoopLogger returns a new [NoopLogger]. Parameters are accepted for
+// API parity, but ignored.
+func NewNoopLogger(_ io.Writer, _ string, _ Level) Logger {
+	logger := &NoopLogger{}
+	return logger
+}

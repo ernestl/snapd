@@ -1,4 +1,5 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
+//go:build go1.21 && !noslog
 
 /*
  * Copyright (C) 2025 Canonical Ltd
@@ -23,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -33,26 +35,43 @@ import (
 	"github.com/snapcore/snapd/testutil"
 )
 
-type SecLogSuite struct {
+type SecLogSlogSuite struct {
 	testutil.BaseTest
+	buf   *bytes.Buffer
 	appId string
 }
 
-var _ = Suite(&SecLogSuite{})
+var _ = Suite(&SecLogSlogSuite{})
 
 func TestSecLog(t *testing.T) { TestingT(t) }
 
-func (s *SecLogSuite) SetUpTest(c *C) {
-	s.BaseTest.SetUpTest(c)
+func (s *SecLogSlogSuite) SetUpSuite(c *C) {
+	s.buf = &bytes.Buffer{}
 	s.appId = "canonical.snapd"
 }
 
-func (s *SecLogSuite) TearDownTest(c *C) {
+func (s *SecLogSlogSuite) SetUpTest(c *C) {
+	s.BaseTest.SetUpTest(c)
+	s.buf.Reset()
 }
 
-func (s *SecLogSuite) TestNew(c *C) {
+func (s *SecLogSlogSuite) TearDownTest(c *C) {
+}
+
+// extractSlogLogger is a test helper to extract the internal [slog.Logger] from
+// Logger.
+func extractSlogLogger(logger seclog.Logger) (*slog.Logger, error) {
+	if l, ok := logger.(*seclog.SlogLogger); !ok {
+		return nil, errors.New("cannot extract slog logger")
+	} else {
+		// return the internal slog logger
+		return l.Logger(), nil
+	}
+}
+
+func (s *SecLogSlogSuite) TestNew(c *C) {
 	buf := &bytes.Buffer{}
-	logger := seclog.New(buf, s.appId, seclog.LevelInfo)
+	logger := seclog.NewSlogLogger(buf, s.appId, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 }
 
@@ -65,9 +84,8 @@ type builtinAttrs struct {
 	AppID       string    `json:"appid"`
 }
 
-func (s *SecLogSuite) TestHandlerAttrsAllTypes(c *C) {
-	buf := &bytes.Buffer{}
-	logger := seclog.New(buf, s.appId, seclog.LevelInfo)
+func (s *SecLogSlogSuite) TestHandlerAttrsAllTypes(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type AttrsAllTypes struct {
@@ -82,7 +100,8 @@ func (s *SecLogSuite) TestHandlerAttrsAllTypes(c *C) {
 		Any       any           `json:"any"`
 	}
 
-	sl := logger.ExtractStructuredLogger()
+	sl, err := extractSlogLogger(logger)
+	c.Assert(err, IsNil)
 	sl.LogAttrs(
 		context.Background(),
 		slog.Level(seclog.LevelInfo),
@@ -103,7 +122,7 @@ func (s *SecLogSuite) TestHandlerAttrsAllTypes(c *C) {
 	)
 
 	var obtained AttrsAllTypes
-	err := json.Unmarshal(buf.Bytes(), &obtained)
+	err = json.Unmarshal(s.buf.Bytes(), &obtained)
 	c.Assert(err, IsNil)
 
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
@@ -120,9 +139,8 @@ func (s *SecLogSuite) TestHandlerAttrsAllTypes(c *C) {
 	c.Check(obtained.Any, DeepEquals, map[string]any{"k": "v", "n": float64(1)})
 }
 
-func (s *SecLogSuite) TestLogLoginSuccess(c *C) {
-	buf := &bytes.Buffer{}
-	logger := seclog.New(buf, s.appId, seclog.LevelInfo)
+func (s *SecLogSlogSuite) TestLogLoginSuccess(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type LoginSuccess struct {
@@ -134,7 +152,7 @@ func (s *SecLogSuite) TestLogLoginSuccess(c *C) {
 	logger.LogLoginSuccess("user@gmail.com")
 
 	var obtained LoginSuccess
-	err := json.Unmarshal(buf.Bytes(), &obtained)
+	err := json.Unmarshal(s.buf.Bytes(), &obtained)
 	c.Assert(err, IsNil)
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "INFO")
@@ -144,9 +162,8 @@ func (s *SecLogSuite) TestLogLoginSuccess(c *C) {
 	c.Check(obtained.User, Equals, "user@gmail.com")
 }
 
-func (s *SecLogSuite) TestLogLoginFailure(c *C) {
-	buf := &bytes.Buffer{}
-	logger := seclog.New(buf, s.appId, seclog.LevelInfo)
+func (s *SecLogSlogSuite) TestLogLoginFailure(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type loginFailure struct {
@@ -158,7 +175,7 @@ func (s *SecLogSuite) TestLogLoginFailure(c *C) {
 	logger.LogLoginFailure("user@gmail.com")
 
 	var obtained loginFailure
-	err := json.Unmarshal(buf.Bytes(), &obtained)
+	err := json.Unmarshal(s.buf.Bytes(), &obtained)
 	c.Assert(err, IsNil)
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "WARN")

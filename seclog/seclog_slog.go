@@ -1,5 +1,5 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
-//go:build go1.21
+//go:build go1.21 && !noslog
 
 /*
  * Copyright (C) 2025 Canonical Ltd
@@ -26,16 +26,29 @@ import (
 	"io"
 	"log/slog"
 	"time"
+
+	"github.com/snapcore/snapd/osutil"
 )
 
-// SecurityLogger provides a security specific logger based on slog.
-type SecurityLogger struct {
+// Ensure [SlogLogger] implements [Logger].
+var _ Logger = (*SlogLogger)(nil)
+
+// SlogLogger provides a security specific logger based on slog.
+type SlogLogger struct {
 	logger   *slog.Logger
 	levelVar *slog.LevelVar
 	ctx      context.Context
 }
 
-func (l *SecurityLogger) LogLoginSuccess(user string) {
+// Logger is a test only helper to retrieve a pointer to the underlying
+// [slog.Logger].
+func (l *SlogLogger) Logger() *slog.Logger {
+	osutil.MustBeTestBinary("SlogLogger should only be used in tests")
+	return l.logger
+}
+
+// LogLoginSuccess implements [Logger.LogLoginSuccess].
+func (l *SlogLogger) LogLoginSuccess(user string) {
 	desc := fmt.Sprintf("User %s login success", user)
 	l.logger.LogAttrs(
 		l.ctx,
@@ -46,7 +59,8 @@ func (l *SecurityLogger) LogLoginSuccess(user string) {
 	)
 }
 
-func (l *SecurityLogger) LogLoginFailure(user string) {
+// LogLoginFailure implements [Logger.LogLoginFailure].
+func (l *SlogLogger) LogLoginFailure(user string) {
 	desc := fmt.Sprintf("User %s login failure", user)
 	l.logger.LogAttrs(
 		l.ctx,
@@ -61,8 +75,8 @@ func (l *SecurityLogger) LogLoginFailure(user string) {
 //
 // It writes newline-delimited JSON to writer and enforces a schema for the
 // built-in attributes:
-//   - time:     key "datetime", formatted in UTC using datetimeFormatSecond
-//   - level:    rendered as a string via levelName (not an integer)
+//   - time:     key "datetime", formatted in UTC using [time.RFC3339Nano]
+//   - level:    rendered as a string via levelName
 //   - message:  key "description"
 //   - source:   omitted
 //
@@ -100,11 +114,14 @@ func newJsonHandler(writer io.Writer, level slog.Leveler) slog.Handler {
 	return slog.NewJSONHandler(writer, options)
 }
 
-func New(writer io.Writer, appID string, level Level) *SecurityLogger {
+// NewSlogLogger constructs a security specific [Logger] backed by [slog] that
+// emits structured JSON to the provided [io.Writer]. The returned logger
+// enables dynamic level control via an internal [slog.LevelVar].
+func NewSlogLogger(writer io.Writer, appID string, level Level) Logger {
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(slog.Level(level))
 	handler := newJsonHandler(writer, levelVar)
-	logger := &SecurityLogger{
+	logger := &SlogLogger{
 		// enable dynamic level adjustment
 		levelVar: levelVar,
 		// always include appid

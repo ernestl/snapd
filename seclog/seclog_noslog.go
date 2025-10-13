@@ -1,4 +1,5 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
+//go:build !go1.21 || noslog
 
 /*
  * Copyright (C) 2025 Canonical Ltd
@@ -18,3 +19,14 @@
  */
 
 package seclog
+
+import (
+	"io"
+)
+
+// NewSlogLogger constructs a fallback [Logger] on builds where slog is
+// unvailable based on the go version.
+func NewSlogLogger(_ io.Writer, _ string, _ Level) Logger {
+	// params are ignored
+	return NewNoopLogger(nil, "", 0)
+}

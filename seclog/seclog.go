@@ -26,7 +26,13 @@ import (
 	//"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// Logger provides a security logging.
+var (
+	// initialize to noop logger
+	globalSecurityLogger Logger = NewNoopLogger(nil, "", 0)
+	lock                 sync.Mutex
+)
+
+// Logger provides security logging.
 type Logger interface {
 	LogLoginSuccess(user string)
 	LogLoginFailure(user string)
@@ -76,20 +82,29 @@ func (l Level) String() string {
 	}
 }
 
-var (
-	logger Logger
-	lock   sync.Mutex
-)
+// SetupSecurityLogger sets a new global security logger.
+func SetupSecurityLogger(appID string) {
+	setLogger(
+		NewSlogLogger(os.Stderr, appID, LevelInfo),
+	)
+}
 
-// SetLogger sets the global logger
 func setLogger(l Logger) {
 	lock.Lock()
 	defer lock.Unlock()
-
-	logger = l
+	globalSecurityLogger = l
 }
 
-func SetupSecurityLogger(appID string) {
-	l := New(os.Stderr, appID, LevelInfo)
-	setLogger(l)
+// LogLoginSuccess using the current global security logger.
+func LogLoginSuccess(user string) {
+	lock.Lock()
+	defer lock.Unlock()
+	globalSecurityLogger.LogLoginSuccess(user)
+}
+
+// LogLoginFailure using the current global security logger.
+func LogLoginFailure(user string) {
+	lock.Lock()
+	defer lock.Unlock()
+	globalSecurityLogger.LogLoginFailure(user)
 }
