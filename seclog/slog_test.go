@@ -35,27 +35,30 @@ import (
 	"github.com/snapcore/snapd/testutil"
 )
 
-type SecLogSlogSuite struct {
+type SlogSuite struct {
 	testutil.BaseTest
-	buf   *bytes.Buffer
-	appId string
+	buf      *bytes.Buffer
+	appID    string
+	provider seclog.Provider
 }
 
-var _ = Suite(&SecLogSlogSuite{})
+var _ = Suite(&SlogSuite{})
 
-func TestSecLog(t *testing.T) { TestingT(t) }
+func TestSlog(t *testing.T) { TestingT(t) }
 
-func (s *SecLogSlogSuite) SetUpSuite(c *C) {
+func (s *SlogSuite) SetUpSuite(c *C) {
 	s.buf = &bytes.Buffer{}
-	s.appId = "canonical.snapd"
+	s.appID = "canonical.snapd"
+	s.provider = seclog.SlogProvider{}
 }
 
-func (s *SecLogSlogSuite) SetUpTest(c *C) {
+func (s *SlogSuite) SetUpTest(c *C) {
 	s.BaseTest.SetUpTest(c)
 	s.buf.Reset()
 }
 
-func (s *SecLogSlogSuite) TearDownTest(c *C) {
+func (s *SlogSuite) TearDownTest(c *C) {
+	s.BaseTest.TearDownTest(c)
 }
 
 // extractSlogLogger is a test helper to extract the internal [slog.Logger] from
@@ -69,10 +72,12 @@ func extractSlogLogger(logger seclog.Logger) (*slog.Logger, error) {
 	}
 }
 
-func (s *SecLogSlogSuite) TestNew(c *C) {
-	buf := &bytes.Buffer{}
-	logger := seclog.NewSlogLogger(buf, s.appId, seclog.LevelInfo)
-	c.Assert(logger, NotNil)
+func (s *SlogSuite) TestSlogProvider(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
+	c.Check(logger, NotNil)
+
+	impl := s.provider.Impl()
+	c.Check(impl, Equals, seclog.ImplSlog)
 }
 
 // builtinAttrs represents the non-optional attributes that is present in
@@ -84,8 +89,8 @@ type builtinAttrs struct {
 	AppID       string    `json:"appid"`
 }
 
-func (s *SecLogSlogSuite) TestHandlerAttrsAllTypes(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type AttrsAllTypes struct {
@@ -128,7 +133,7 @@ func (s *SecLogSlogSuite) TestHandlerAttrsAllTypes(c *C) {
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "INFO")
 	c.Check(obtained.Description, Equals, "test description")
-	c.Check(obtained.AppID, Equals, s.appId)
+	c.Check(obtained.AppID, Equals, s.appID)
 	c.Check(obtained.String, Equals, "test string")
 	c.Check(obtained.Duration, Equals, time.Duration(90*time.Second))
 	c.Check(obtained.Timestamp, Equals, time.Date(2025, 10, 8, 8, 0, 0, 0, time.UTC))
@@ -139,8 +144,8 @@ func (s *SecLogSlogSuite) TestHandlerAttrsAllTypes(c *C) {
 	c.Check(obtained.Any, DeepEquals, map[string]any{"k": "v", "n": float64(1)})
 }
 
-func (s *SecLogSlogSuite) TestLogLoginSuccess(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *SlogSuite) TestLogLoginSuccess(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type LoginSuccess struct {
@@ -157,13 +162,13 @@ func (s *SecLogSlogSuite) TestLogLoginSuccess(c *C) {
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "INFO")
 	c.Check(obtained.Description, Equals, "User user@gmail.com login success")
-	c.Check(obtained.AppID, Equals, s.appId)
+	c.Check(obtained.AppID, Equals, s.appID)
 	c.Check(obtained.Event, Equals, "authn_login_success")
 	c.Check(obtained.User, Equals, "user@gmail.com")
 }
 
-func (s *SecLogSlogSuite) TestLogLoginFailure(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *SlogSuite) TestLogLoginFailure(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type loginFailure struct {
@@ -180,7 +185,7 @@ func (s *SecLogSlogSuite) TestLogLoginFailure(c *C) {
 	c.Check(time.Now().Sub(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "WARN")
 	c.Check(obtained.Description, Equals, "User user@gmail.com login failure")
-	c.Check(obtained.AppID, Equals, s.appId)
+	c.Check(obtained.AppID, Equals, s.appID)
 	c.Check(obtained.Event, Equals, "authn_login_failure")
 	c.Check(obtained.User, Equals, "user@gmail.com")
 }

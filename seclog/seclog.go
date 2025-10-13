@@ -29,7 +29,7 @@ import (
 
 var (
 	providers           = map[Impl]Provider{}
-	globalLogger Logger = NewNopLogger()
+	globalLogger Logger = newNopLogger()
 	lock         sync.Mutex
 )
 
@@ -88,8 +88,8 @@ type Impl string
 
 // Logger implementations.
 const (
-	Nop  Impl = "nop"
-	Slog Impl = "slog" // slog based structured logger
+	ImplNop  Impl = "nop"
+	ImplSlog Impl = "slog" // slog based structured logger
 )
 
 // Provider provides functions required for contructing a [Logger].
@@ -117,12 +117,6 @@ func SetupLogger(impl Impl, appID string, level Level) {
 	defer lock.Unlock()
 	if provider, exists := providers[impl]; exists {
 		setLogger(provider.New(os.Stdout, appID, level))
-	}
-
-	if provider, exists := providers[Nop]; exists {
-		setLogger(provider.New(nil, "", 0))
-	} else {
-		panic("nop logger not registered")
 	}
 }
 

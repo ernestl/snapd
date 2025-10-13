@@ -1,5 +1,4 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
-//go:build !go1.21 || noslog
 
 /*
  * Copyright (C) 2025 Canonical Ltd
@@ -22,7 +21,6 @@ package seclog_test
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 
 	. "gopkg.in/check.v1"
@@ -31,56 +29,49 @@ import (
 	"github.com/snapcore/snapd/testutil"
 )
 
-type SecLogSlogSuite struct {
+type NopSuite struct {
 	testutil.BaseTest
-	buf   *bytes.Buffer
-	appId string
+	buf      *bytes.Buffer
+	appID    string
+	provider seclog.Provider
 }
 
-var _ = Suite(&SecLogSlogSuite{})
+var _ = Suite(&NopSuite{})
 
-func TestSecLog(t *testing.T) { TestingT(t) }
+func TestNop(t *testing.T) { TestingT(t) }
 
-func (s *SecLogSlogSuite) SetUpSuite(c *C) {
+func (s *NopSuite) SetUpSuite(c *C) {
 	s.buf = &bytes.Buffer{}
-	s.appId = "canonical.snapd"
+	s.appID = "canonical.snapd"
+	s.provider = seclog.NopProvider{}
 }
 
-func (s *SecLogSlogSuite) SetUpTest(c *C) {
+func (s *NopSuite) SetUpTest(c *C) {
 	s.BaseTest.SetUpTest(c)
-	s.buf.Reset()
 }
 
-func (s *SecLogSlogSuite) TearDownTest(c *C) {
+func (s *NopSuite) TearDownTest(c *C) {
+	s.BaseTest.TearDownTest(c)
 }
 
-// extractSloglogger is a test helper to extract [seclog.NoopLogger] from Logger.
-func extractNoopLogger(logger seclog.Logger) (*seclog.NoopLogger, error) {
-	if l, ok := logger.(*seclog.NoopLogger); !ok {
-		return nil, errors.New("cannot extract noop logger")
-	} else {
-		return l, nil
-	}
-}
-
-func (s *SecLogSlogSuite) TestNew(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *NopSuite) TestNopProvider(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
-	_, err := extractNoopLogger(logger)
-	c.Assert(err, IsNil)
+	impl := s.provider.Impl()
+	c.Assert(impl, Equals, seclog.ImplNop)
 }
 
-func (s *SecLogSlogSuite) TestLogLoginSuccess(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *NopSuite) TestLogLoginSuccess(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	logger.LogLoginSuccess("user@gmail.com")
 	c.Assert(s.buf.Len(), Equals, 0)
 }
 
-func (s *SecLogSlogSuite) TestLogLoginFailure(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appId, seclog.LevelInfo)
+func (s *NopSuite) TestLogLoginFailure(c *C) {
+	logger := s.provider.New(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	logger.LogLoginFailure("user@gmail.com")

@@ -30,11 +30,11 @@ import (
 	"github.com/snapcore/snapd/osutil"
 )
 
-// Ensure [SlogLogger] implements [Logger].
-var _ Logger = (*SlogLogger)(nil)
+// Ensure [slogLogger] implements [Logger].
+var _ Logger = (*slogLogger)(nil)
 
-// SlogLogger provides a security specific logger based on slog.
-type SlogLogger struct {
+// slogLogger provides a security specific logger based on slog.
+type slogLogger struct {
 	logger   *slog.Logger
 	levelVar *slog.LevelVar
 	ctx      context.Context
@@ -42,13 +42,13 @@ type SlogLogger struct {
 
 // Logger is a test only helper to retrieve a pointer to the underlying
 // [slog.Logger].
-func (l *SlogLogger) Logger() *slog.Logger {
-	osutil.MustBeTestBinary("SlogLogger should only be used in tests")
+func (l *slogLogger) Logger() *slog.Logger {
+	osutil.MustBeTestBinary("slogLogger should only be used in tests")
 	return l.logger
 }
 
 // LogLoginSuccess implements [Logger.LogLoginSuccess].
-func (l *SlogLogger) LogLoginSuccess(user string) {
+func (l *slogLogger) LogLoginSuccess(user string) {
 	desc := fmt.Sprintf("User %s login success", user)
 	l.logger.LogAttrs(
 		l.ctx,
@@ -60,7 +60,7 @@ func (l *SlogLogger) LogLoginSuccess(user string) {
 }
 
 // LogLoginFailure implements [Logger.LogLoginFailure].
-func (l *SlogLogger) LogLoginFailure(user string) {
+func (l *slogLogger) LogLoginFailure(user string) {
 	desc := fmt.Sprintf("User %s login failure", user)
 	l.logger.LogAttrs(
 		l.ctx,
@@ -114,14 +114,11 @@ func newJsonHandler(writer io.Writer, level slog.Leveler) slog.Handler {
 	return slog.NewJSONHandler(writer, options)
 }
 
-// NewSlogLogger constructs a security specific [Logger] backed by [slog] that
-// emits structured JSON to the provided [io.Writer]. The returned logger
-// enables dynamic level control via an internal [slog.LevelVar].
-func NewSlogLogger(writer io.Writer, appID string, level Level) Logger {
+func newSlogLogger(writer io.Writer, appID string, level Level) Logger {
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(slog.Level(level))
 	handler := newJsonHandler(writer, levelVar)
-	logger := &SlogLogger{
+	logger := &slogLogger{
 		// enable dynamic level adjustment
 		levelVar: levelVar,
 		// always include appid
@@ -137,22 +134,12 @@ type slogProvider struct{}
 // provided [io.Writer]. The returned logger enables dynamic level control
 // via an internal [slog.LevelVar].
 func (slogProvider) New(writer io.Writer, appID string, level Level) Logger {
-	levelVar := new(slog.LevelVar)
-	levelVar.Set(slog.Level(level))
-	handler := newJsonHandler(writer, levelVar)
-	logger := &SlogLogger{
-		// enable dynamic level adjustment
-		levelVar: levelVar,
-		// always include appid
-		logger: slog.New(handler).With("appid", appID),
-	}
-	return logger
-
+	return newSlogLogger(writer, appID, level)
 }
 
 // Impl returns the implementation.
 func (slogProvider) Impl() Impl {
-	return Slog
+	return ImplSlog
 }
 
 func init() {

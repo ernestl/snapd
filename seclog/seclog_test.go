@@ -1,5 +1,4 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
-//go:build go1.21 && !noslog
 
 /*
  * Copyright (C) 2025 Canonical Ltd
@@ -22,6 +21,7 @@ package seclog_test
 
 import (
 	"bytes"
+	"testing"
 
 	. "gopkg.in/check.v1"
 
@@ -36,6 +36,8 @@ type SecLogSuite struct {
 }
 
 var _ = Suite(&SecLogSuite{})
+
+func TestSecLog(t *testing.T) { TestingT(t) }
 
 func (s *SecLogSuite) SetUpSuite(c *C) {
 	s.buf = &bytes.Buffer{}
