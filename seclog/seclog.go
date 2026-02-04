@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	//"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -116,14 +115,8 @@ func SetupLogger(impl Impl, appID string, level Level) {
 	lock.Lock()
 	defer lock.Unlock()
 	if provider, exists := providers[impl]; exists {
-		setLogger(provider.New(os.Stdout, appID, level))
+		globalLogger = provider.New(os.Stdout, appID, level)
 	}
-}
-
-func setLogger(l Logger) {
-	lock.Lock()
-	defer lock.Unlock()
-	globalLogger = l
 }
 
 // LogLoginSuccess using the current global security logger.
