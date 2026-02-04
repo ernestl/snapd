@@ -80,13 +80,15 @@ func (s *SlogSuite) TestSlogProvider(c *C) {
 	c.Check(impl, Equals, seclog.ImplSlog)
 }
 
-// builtinAttrs represents the non-optional attributes that is present in
+// baseAttrs represents the non-optional attributes that is present in
 // every record
-type builtinAttrs struct {
+type baseAttrs struct {
 	Datetime    time.Time `json:"datetime"`
 	Level       string    `json:"level"`
 	Description string    `json:"description"`
-	AppID       string    `json:"appid"`
+	AppID       string    `json:"app_id"`
+	Type        string    `json:"type"`
+	Category    string    `json:"category"`
 }
 
 func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
@@ -94,7 +96,7 @@ func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
 	c.Assert(logger, NotNil)
 
 	type AttrsAllTypes struct {
-		builtinAttrs
+		baseAttrs
 		String    string        `json:"string"`
 		Duration  time.Duration `json:"duration"`
 		Timestamp time.Time     `json:"timestamp"`
@@ -111,6 +113,7 @@ func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
 		context.Background(),
 		slog.Level(seclog.LevelInfo),
 		"test description",
+		slog.Attr{"category", slog.StringValue("AUTHN")},
 		slog.Attr{"string", slog.StringValue("test string")},
 		slog.Attr{"duration", slog.DurationValue(time.Duration(90 * time.Second))},
 		slog.Attr{
@@ -134,6 +137,9 @@ func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
 	c.Check(obtained.Level, Equals, "INFO")
 	c.Check(obtained.Description, Equals, "test description")
 	c.Check(obtained.AppID, Equals, s.appID)
+	c.Check(obtained.Type, Equals, "security")
+	c.Check(obtained.Category, Equals, "AUTHN")
+
 	c.Check(obtained.String, Equals, "test string")
 	c.Check(obtained.Duration, Equals, time.Duration(90*time.Second))
 	c.Check(obtained.Timestamp, Equals, time.Date(2025, 10, 8, 8, 0, 0, 0, time.UTC))
@@ -149,7 +155,7 @@ func (s *SlogSuite) TestLogLoginSuccess(c *C) {
 	c.Assert(logger, NotNil)
 
 	type LoginSuccess struct {
-		builtinAttrs
+		baseAttrs
 		Event string `json:"event"`
 		User  string `json:"user"`
 	}
@@ -172,7 +178,7 @@ func (s *SlogSuite) TestLogLoginFailure(c *C) {
 	c.Assert(logger, NotNil)
 
 	type loginFailure struct {
-		builtinAttrs
+		baseAttrs
 		Event string `json:"event"`
 		User  string `json:"user"`
 	}

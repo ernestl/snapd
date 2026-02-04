@@ -54,6 +54,7 @@ func (l *slogLogger) LogLoginSuccess(user string) {
 		l.ctx,
 		slog.Level(LevelInfo),
 		desc,
+		slog.Attr{"category", slog.StringValue("AUTHN")},
 		slog.Attr{"event", slog.StringValue("authn_login_success")},
 		slog.Attr{"user", slog.StringValue(user)},
 	)
@@ -66,6 +67,7 @@ func (l *slogLogger) LogLoginFailure(user string) {
 		l.ctx,
 		slog.Level(LevelWarn),
 		desc,
+		slog.Attr{"category", slog.StringValue("AUTHN")},
 		slog.Attr{"event", slog.StringValue("authn_login_failure")},
 		slog.Attr{"user", slog.StringValue(user)},
 	)
@@ -121,8 +123,11 @@ func newSlogLogger(writer io.Writer, appID string, level Level) Logger {
 	logger := &slogLogger{
 		// enable dynamic level adjustment
 		levelVar: levelVar,
-		// always include appid
-		logger: slog.New(handler).With("appid", appID),
+		// always include app_id
+		logger: slog.New(handler).With(
+			slog.String("app_id", appID),
+			slog.String("type", "security"),
+		),
 	}
 	return logger
 }
