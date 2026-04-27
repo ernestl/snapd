@@ -29,40 +29,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sync"
 	"time"
-
-	"github.com/snapcore/snapd/osutil"
 )
 
-// slogImplementation implements [implFactory].
-type slogImplementation struct{}
-
-// Ensure [slogImplementation] implements [implFactory].
-var _ implFactory = slogImplementation{}
-
-// New constructs an slog based [securityLogger] that emits structured JSON to the
-// provided [io.Writer]. The returned logger enables dynamic level control via
-// an internal [slog.LevelVar].
-func (slogImplementation) New(writer io.Writer, appID string, minLevel Level) securityLogger {
-	return newSlogLogger(writer, appID, minLevel)
-}
-
-func init() {
-	registerImpl(ImplSlog, slogImplementation{})
-}
-
-func newSlogLogger(writer io.Writer, appID string, minLevel Level) securityLogger {
-	levelVar := new(slog.LevelVar)
-	levelVar.Set(slog.Level(minLevel))
-	var handler slog.Handler = newJsonHandler(writer, levelVar)
-	if lw, ok := writer.(levelWriter); ok {
-		handler = newLevelHandler(handler, lw)
-	}
+// NewSlogLogger creates a new security logger backed by log/slog that
+// writes structured JSON to writer. Events at or above minLevel are
+// emitted; lower-level events are silently discarded.
+func NewSlogLogger(writer io.Writer, appID string, minLevel Level) SecurityLogger {
+	var handler slog.Handler = newJsonHandler(writer, slog.Level(minLevel))
 
 	logger := &slogLogger{
-		// enable dynamic level adjustment
-		levelVar: levelVar,
 		// always include app_id and type
 		logger: slog.New(handler).With(
 			slog.String("app_id", appID),
@@ -72,29 +48,19 @@ func newSlogLogger(writer io.Writer, appID string, minLevel Level) securityLogge
 	return logger
 }
 
-// slogLogger implements [securityLogger] and is constructed by the
-// [slogImplementation]. It wraps a [slog.Logger] and provides the required
+// Ensure [slogLogger] implements [SecurityLogger].
+var _ SecurityLogger = (*slogLogger)(nil)
+
+// slogLogger implements [SecurityLogger] and is constructed by
+// [NewSlogLogger]. It wraps a [slog.Logger] and provides the required
 // methods. The logger emits structured JSON with a predefined schema for
-// built-in attributes and supports dynamic log level control via an internal
-// [slog.LevelVar]. When used with a [levelWriter] sink, it ensures that
-// each message is written with the correct severity level.
+// built-in attributes.
 type slogLogger struct {
-	logger   *slog.Logger
-	levelVar *slog.LevelVar
+	logger *slog.Logger
 }
 
-// Ensure [slogLogger] implements [securityLogger].
-var _ securityLogger = (*slogLogger)(nil)
-
-// SlogLogger is a test only helper to retrieve a pointer to the underlying
-// [slog.Logger].
-func (l *slogLogger) SlogLogger() *slog.Logger {
-	osutil.MustBeTestBinary("SlogLogger() is for testing only")
-	return l.logger
-}
-
-// LogLoggingEnabled implements [securityLogger.LogLoggingEnabled].
-func (l *slogLogger) LogLoggingEnabled() {
+// LogLoggerEnabled implements [SecurityLogger.LogLoggerEnabled].
+func (l *slogLogger) LogLoggerEnabled() {
 	l.logger.LogAttrs(
 		context.Background(),
 		slog.Level(LevelInfo),
@@ -104,8 +70,8 @@ func (l *slogLogger) LogLoggingEnabled() {
 	)
 }
 
-// LogLoggingDisabled implements [securityLogger.LogLoggingDisabled].
-func (l *slogLogger) LogLoggingDisabled() {
+// LogLoggerDisabled implements [SecurityLogger.LogLoggerDisabled].
+func (l *slogLogger) LogLoggerDisabled() {
 	l.logger.LogAttrs(
 		context.Background(),
 		slog.Level(LevelCritical),
@@ -115,7 +81,7 @@ func (l *slogLogger) LogLoggingDisabled() {
 	)
 }
 
-// LogLoginSuccess implements [securityLogger.LogLoginSuccess].
+// LogLoginSuccess implements [SecurityLogger.LogLoginSuccess].
 func (l *slogLogger) LogLoginSuccess(user SnapdUser) {
 	l.logger.LogAttrs(
 		context.Background(),
@@ -127,7 +93,7 @@ func (l *slogLogger) LogLoginSuccess(user SnapdUser) {
 	)
 }
 
-// LogLoginFailure implements [securityLogger.LogLoginFailure].
+// LogLoginFailure implements [SecurityLogger.LogLoginFailure].
 func (l *slogLogger) LogLoginFailure(user SnapdUser, reason Reason) {
 	l.logger.LogAttrs(
 		context.Background(),
@@ -163,8 +129,8 @@ func (u SnapdUser) LogValue() slog.Value {
 //   - level:    rendered as a string via [Level.String]
 //   - message:  key "description"
 //
-// [newSlogLogger] adds additional built-in attributes to the logger context:
-//   - app_id:   always included with the value provided to newSlogLogger
+// [NewSlogLogger] adds additional built-in attributes to the logger context:
+//   - app_id:   always included with the value provided to [NewSlogLogger]
 //   - type:     always included with the value "security"
 //
 // Additional attributes are preserved verbatim, including nested groups. The
@@ -195,42 +161,4 @@ func newJsonHandler(writer io.Writer, minLevel slog.Leveler) slog.Handler {
 	}
 
 	return slog.NewJSONHandler(writer, options)
-}
-
-// levelHandler is a [slog.Handler] wrapper that sets the level on a
-// [levelWriter] before each message is handled. This ensures that the
-// written output carries the correct per-message priority.
-//
-// All derived handlers returned by WithAttrs and WithGroup share the same
-// [levelWriter] and mutex, since they write to the same sink.
-type levelHandler struct {
-	inner slog.Handler
-	lw    levelWriter
-	mu    *sync.Mutex
-}
-
-func newLevelHandler(inner slog.Handler, lw levelWriter) slog.Handler {
-	return &levelHandler{inner: inner, lw: lw, mu: &sync.Mutex{}}
-}
-
-func (h *levelHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
-}
-
-func (h *levelHandler) Handle(ctx context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.lw.SetLevel(Level(r.Level))
-	return h.inner.Handle(ctx, r)
-}
-
-func (h *levelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &levelHandler{inner: h.inner.WithAttrs(attrs), lw: h.lw, mu: h.mu}
-}
-
-// WithGroup is required by the [slog.Handler] interface but is not currently
-// used by seclog.
-func (h *levelHandler) WithGroup(name string) slog.Handler {
-	return &levelHandler{inner: h.inner.WithGroup(name), lw: h.lw, mu: h.mu}
 }

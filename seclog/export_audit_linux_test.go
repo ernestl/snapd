@@ -1,5 +1,4 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
-//go:build go1.21 && !nonativeendian
 
 /*
  * Copyright (C) 2026 Canonical Ltd
@@ -24,26 +23,16 @@ import (
 	"github.com/snapcore/snapd/testutil"
 )
 
-type AuditWriter = auditWriter
-
-type AuditSinkFactory = auditSinkFactory
-
 type NetlinkOps = netlinkOps
 
 var NlmsgAlign = nlmsgAlign
 
-const NlmsghdrSize = nlmsghdrSize
-
 const AuditTrustedApp = auditTrustedApp
 
-func AuditWriterBuildMessage(aw *auditWriter, payload []byte) []byte {
+func AuditWriterBuildMessage(aw *AuditWriter, payload []byte) []byte {
 	return aw.buildMessage(payload)
 }
 
-func AuditWriterSetPortID(aw *auditWriter, id uint32) {
-	aw.portID = id
-}
-
-func MockNetlink(ops netlinkOps) (restore func()) {
+func MockNetlinkOps(ops netlinkOps) (restore func()) {
 	return testutil.Mock(&netlink, ops)
 }

@@ -22,12 +22,9 @@ package seclog_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"time"
-
-	"log/slog"
 
 	. "gopkg.in/check.v1"
 
@@ -37,9 +34,8 @@ import (
 
 type SlogSuite struct {
 	testutil.BaseTest
-	buf     *bytes.Buffer
-	appID   string
-	factory seclog.ImplFactory
+	buf   *bytes.Buffer
+	appID string
 }
 
 var _ = Suite(&SlogSuite{})
@@ -47,7 +43,6 @@ var _ = Suite(&SlogSuite{})
 func (s *SlogSuite) SetUpSuite(c *C) {
 	s.buf = &bytes.Buffer{}
 	s.appID = "canonical.snapd"
-	s.factory = seclog.SlogImplementation{}
 }
 
 func (s *SlogSuite) SetUpTest(c *C) {
@@ -59,19 +54,8 @@ func (s *SlogSuite) TearDownTest(c *C) {
 	s.BaseTest.TearDownTest(c)
 }
 
-// extractSlogLogger is a test helper to extract the internal [slog.Logger] from
-// SecurityLogger.
-func extractSlogLogger(logger seclog.SecurityLogger) (*slog.Logger, error) {
-	if l, ok := logger.(*seclog.SlogLogger); !ok {
-		return nil, errors.New("cannot extract slog logger")
-	} else {
-		// return the internal slog logger
-		return l.SlogLogger(), nil
-	}
-}
-
-func (s *SlogSuite) TestSlogImplementation(c *C) {
-	logger := s.factory.New(s.buf, s.appID, seclog.LevelInfo)
+func (s *SlogSuite) TestNewSlogLogger(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Check(logger, NotNil)
 }
 
@@ -117,67 +101,70 @@ func orderedKeys(data []byte) ([]string, error) {
 	return keys, nil
 }
 
-type attrsAllTypes struct {
-	baseAttrs
-	String    string        `json:"string"`
-	Duration  time.Duration `json:"duration"`
-	Timestamp time.Time     `json:"timestamp"`
-	Float64   float64       `json:"float64"`
-	Int64     int64         `json:"int64"`
-	Int       int64         `json:"int"`
-	Uint64    uint64        `json:"uint64"`
-	Any       any           `json:"any"`
-}
-
-func (s *SlogSuite) TestHandlerAttrsAllTypes(c *C) {
-	logger := s.factory.New(s.buf, s.appID, seclog.LevelInfo)
+func (s *SlogSuite) TestLogLoggerEnabled(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
-	sl, err := extractSlogLogger(logger)
-	c.Assert(err, IsNil)
-	sl.LogAttrs(
-		context.Background(),
-		slog.Level(seclog.LevelInfo),
-		"test description",
-		slog.Attr{Key: "category", Value: slog.StringValue("AUTHN")},
-		slog.Attr{Key: "string", Value: slog.StringValue("test string")},
-		slog.Attr{Key: "duration", Value: slog.DurationValue(time.Duration(90 * time.Second))},
-		slog.Attr{
-			Key:   "timestamp",
-			Value: slog.TimeValue(time.Date(2025, 10, 8, 8, 0, 0, 0, time.UTC)),
-		},
-		slog.Attr{Key: "float64", Value: slog.Float64Value(3.141592653589793)},
-		slog.Attr{Key: "int64", Value: slog.Int64Value(-4611686018427387904)},
-		slog.Attr{Key: "int", Value: slog.IntValue(-2147483648)},
-		slog.Attr{Key: "uint64", Value: slog.Uint64Value(4294967295)},
-		// AnyValue returns value of KindInt64, the original
-		// numeric type is not preserved
-		slog.Attr{Key: "any", Value: slog.AnyValue(map[string]any{"k": "v", "n": int(1)})},
-	)
+	type sysEvent struct {
+		baseAttrs
+		Event string `json:"event"`
+	}
 
-	var obtained attrsAllTypes
-	err = json.Unmarshal(s.buf.Bytes(), &obtained)
-	c.Assert(err, IsNil)
+	logger.LogLoggerEnabled()
 
+	var obtained sysEvent
+	err := json.Unmarshal(s.buf.Bytes(), &obtained)
+	c.Assert(err, IsNil)
 	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "INFO")
-	c.Check(obtained.Description, Equals, "test description")
+	c.Check(obtained.Description, Equals, "Security logging enabled")
 	c.Check(obtained.AppID, Equals, s.appID)
 	c.Check(obtained.Type, Equals, "security")
-	c.Check(obtained.Category, Equals, "AUTHN")
+	c.Check(obtained.Category, Equals, "SYS")
+	c.Check(obtained.Event, Equals, "sys_logging_enabled")
 
-	c.Check(obtained.String, Equals, "test string")
-	c.Check(obtained.Duration, Equals, time.Duration(90*time.Second))
-	c.Check(obtained.Timestamp, Equals, time.Date(2025, 10, 8, 8, 0, 0, 0, time.UTC))
-	c.Check(obtained.Float64, Equals, float64(3.141592653589793))
-	c.Check(obtained.Int64, Equals, int64(-4611686018427387904))
-	c.Check(obtained.Int, Equals, int64(-2147483648)) // 32 bit compatible
-	c.Check(obtained.Uint64, Equals, uint64(4294967295))
-	c.Check(obtained.Any, DeepEquals, map[string]any{"k": "v", "n": float64(1)})
+	// verify key order for human readability
+	keys, err := orderedKeys(s.buf.Bytes())
+	c.Assert(err, IsNil)
+	c.Check(keys, DeepEquals, []string{
+		"datetime", "level", "description",
+		"app_id", "type", "category", "event",
+	})
+}
+
+func (s *SlogSuite) TestLogLoggerDisabled(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
+	c.Assert(logger, NotNil)
+
+	type sysEvent struct {
+		baseAttrs
+		Event string `json:"event"`
+	}
+
+	logger.LogLoggerDisabled()
+
+	var obtained sysEvent
+	err := json.Unmarshal(s.buf.Bytes(), &obtained)
+	c.Assert(err, IsNil)
+	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
+	c.Check(obtained.Level, Equals, "CRITICAL")
+	c.Check(obtained.Description, Equals, "Security logging disabled")
+	c.Check(obtained.AppID, Equals, s.appID)
+	c.Check(obtained.Type, Equals, "security")
+	c.Check(obtained.Category, Equals, "SYS")
+	c.Check(obtained.Event, Equals, "sys_logging_disabled")
+
+	// verify key order for human readability
+	keys, err := orderedKeys(s.buf.Bytes())
+	c.Assert(err, IsNil)
+	c.Check(keys, DeepEquals, []string{
+		"datetime", "level", "description",
+		"app_id", "type", "category", "event",
+	})
 }
 
 func (s *SlogSuite) TestLogLoginSuccess(c *C) {
-	logger := s.factory.New(s.buf, s.appID, seclog.LevelInfo)
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type LoginSuccess struct {
@@ -221,7 +208,7 @@ func (s *SlogSuite) TestLogLoginSuccess(c *C) {
 }
 
 func (s *SlogSuite) TestLogLoginSuccessWithExpiration(c *C) {
-	logger := s.factory.New(s.buf, s.appID, seclog.LevelInfo)
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type LoginSuccess struct {
@@ -251,7 +238,7 @@ func (s *SlogSuite) TestLogLoginSuccessWithExpiration(c *C) {
 }
 
 func (s *SlogSuite) TestLogLoginFailure(c *C) {
-	logger := s.factory.New(s.buf, s.appID, seclog.LevelInfo)
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
 	type loginFailure struct {
@@ -300,30 +287,15 @@ func (s *SlogSuite) TestLogLoginFailure(c *C) {
 	})
 }
 
-// levelBuf is a bytes.Buffer that also implements [seclog.LevelWriter],
-// recording the level set before each log message is written.
-type levelBuf struct {
-	bytes.Buffer
-	levels []seclog.Level
-}
+func (s *SlogSuite) TestLevelFiltering(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelWarn)
+	c.Assert(logger, NotNil)
 
-func (lb *levelBuf) SetLevel(l seclog.Level) {
-	lb.levels = append(lb.levels, l)
-}
+	// LevelInfo is below LevelWarn — should be filtered out
+	logger.LogLoggerEnabled()
+	c.Check(s.buf.Len(), Equals, 0)
 
-func (s *SlogSuite) TestLevelHandlerSetsLevelBeforeWrite(c *C) {
-	lb := &levelBuf{}
-	logger := seclog.SlogImplementation{}.New(lb, s.appID, seclog.LevelInfo)
-
-	slogLogger, err := extractSlogLogger(logger)
-	c.Assert(err, IsNil)
-
-	// Use seclog level values cast to slog.Level so they pass the
-	// level threshold set by newSlogLogger (slog.Level(seclog.LevelInfo)).
-	slogLogger.Log(context.Background(), slog.Level(seclog.LevelInfo), "info message")
-	slogLogger.Log(context.Background(), slog.Level(seclog.LevelWarn), "warn message")
-
-	c.Assert(len(lb.levels), Equals, 2)
-	c.Check(lb.levels[0], Equals, seclog.LevelInfo)
-	c.Check(lb.levels[1], Equals, seclog.LevelWarn)
+	// LevelWarn meets the threshold — should be emitted
+	logger.LogLoginFailure(seclog.SnapdUser{ID: 1}, seclog.Reason{Code: seclog.ReasonInternal, Message: "test"})
+	c.Check(s.buf.Len() > 0, Equals, true)
 }

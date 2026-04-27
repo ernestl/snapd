@@ -20,7 +20,9 @@
 package main_test
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -35,6 +37,7 @@ import (
 	"github.com/snapcore/snapd/interfaces/seccomp"
 	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/osutil"
+	"github.com/snapcore/snapd/seclog/seclogtest"
 	"github.com/snapcore/snapd/testutil"
 )
 
@@ -126,4 +129,50 @@ func (s *snapdSuite) TestSyscheckFailGoesIntoDegradedMode(c *C) {
 	// stop the daemon
 	close(ch)
 	wg.Wait()
+}
+
+func (s *snapdSuite) TestSetupSecurityLoggingSuccess(c *C) {
+	logbuf, restore := logger.MockLogger()
+	defer restore()
+
+	restore = snapd.MockOpenAuditWriter(func() (io.Writer, error) {
+		return &bytes.Buffer{}, nil
+	})
+	defer restore()
+
+	seclogBuf, mockNewLogger := seclogtest.NewMockSlogLogger()
+	restore = snapd.MockNewSlogLogger(mockNewLogger)
+	defer restore()
+
+	teardown := snapd.SetupSecurityLogging()
+	// The "enabled" event was logged via the security logger.
+	c.Check(seclogBuf.String(), testutil.Contains, "sys_logging_enabled")
+
+	seclogBuf.Reset()
+	teardown()
+	// The "disabled" event was logged before closing.
+	c.Check(seclogBuf.String(), testutil.Contains, "sys_logging_disabled")
+
+	// No errors in the snapd log.
+	logger.WithLoggerLock(func() {
+		c.Check(logbuf.String(), Not(testutil.Contains), "cannot set up security logger")
+	})
+}
+
+func (s *snapdSuite) TestSetupSecurityLoggingAuditWriterError(c *C) {
+	logbuf, restore := logger.MockLogger()
+	defer restore()
+
+	restore = snapd.MockOpenAuditWriter(func() (io.Writer, error) {
+		return nil, fmt.Errorf("permission denied")
+	})
+	defer restore()
+
+	teardown := snapd.SetupSecurityLogging()
+	defer teardown()
+
+	// The error was logged.
+	logger.WithLoggerLock(func() {
+		c.Check(logbuf.String(), testutil.Contains, "cannot set up security logger: permission denied")
+	})
 }

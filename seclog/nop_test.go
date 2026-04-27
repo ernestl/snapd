@@ -40,20 +40,20 @@ func (s *NopSuite) TearDownTest(c *C) {
 	s.BaseTest.TearDownTest(c)
 }
 
-func (s *NopSuite) TestLogLoggingEnabled(c *C) {
+func (s *NopSuite) TestLogLoggerEnabled(c *C) {
 	logger := seclog.NewNopLogger()
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoggingEnabled()
+	logger.LogLoggerEnabled()
 }
 
-func (s *NopSuite) TestLogLoggingDisabled(c *C) {
+func (s *NopSuite) TestLogLoggerDisabled(c *C) {
 	logger := seclog.NewNopLogger()
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoggingDisabled()
+	logger.LogLoggerDisabled()
 }
 
 func (s *NopSuite) TestLogLoginSuccess(c *C) {

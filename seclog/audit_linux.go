@@ -1,14 +1,5 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
 
-// go1.21 is required for binary.NativeEndian which is used to serialize
-// netlink headers in host byte order. NativeEndian is supported on all
-// architectures snapd targets: amd64, arm, arm64, ppc64le, riscv64.
-// See https://cs.opensource.google/go/go/+/refs/tags/go1.26.2:src/encoding/binary/native_endian_little.go
-// The nonativeendian tag allows excluding this file on toolchains that
-// lack NativeEndian support.
-// See https://go.dev/doc/go1.21#encoding/binary
-//go:build go1.21 && !nonativeendian
-
 /*
  * Copyright (C) 2026 Canonical Ltd
  *
@@ -29,32 +20,26 @@
 package seclog
 
 import (
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/snapcore/snapd/arch"
 )
 
 const (
 	// AUDIT_TRUSTED_APP is the audit message type for trusted application messages.
-	// See https://github.com/linux-audit/audit-userspace/blob/master/lib/audit-records.h
+	// See https://github.com/linux-audit/audit-userspace/blob/a54613b2b6233669972d55f1f5463ae4757700be/lib/audit-records.h#L75
 	auditTrustedApp = 1121
-
-	// NETLINK_AUDIT is the netlink protocol for audit.
-	// See https://github.com/torvalds/linux/blob/master/include/uapi/linux/netlink.h
-	netlinkAudit = 9
 )
 
-// netlinkOps abstracts the syscall operations needed to open, bind, query,
+// netlinkOps abstracts the syscall operations needed to open,
 // send to, and close a netlink socket. Production code uses [realNetlinkOps];
 // tests can substitute a recording or stubbing implementation.
 type netlinkOps interface {
 	Socket(domain, typ, proto int) (int, error)
-	Bind(fd int, sa syscall.Sockaddr) error
-	Getsockname(fd int) (syscall.Sockaddr, error)
-	Sendto(fd int, p []byte, flags int, to syscall.Sockaddr) error
+	Sendto(fd int, payload []byte, flags int, to syscall.Sockaddr) error
 	Close(fd int) error
 }
 
@@ -65,16 +50,8 @@ func (realNetlinkOps) Socket(domain, typ, proto int) (int, error) {
 	return syscall.Socket(domain, typ, proto)
 }
 
-func (realNetlinkOps) Bind(fd int, sa syscall.Sockaddr) error {
-	return syscall.Bind(fd, sa)
-}
-
-func (realNetlinkOps) Getsockname(fd int) (syscall.Sockaddr, error) {
-	return syscall.Getsockname(fd)
-}
-
-func (realNetlinkOps) Sendto(fd int, p []byte, flags int, to syscall.Sockaddr) error {
-	return syscall.Sendto(fd, p, flags, to)
+func (realNetlinkOps) Sendto(fd int, payload []byte, flags int, to syscall.Sockaddr) error {
+	return syscall.Sendto(fd, payload, flags, to)
 }
 
 func (realNetlinkOps) Close(fd int) error {
@@ -83,72 +60,31 @@ func (realNetlinkOps) Close(fd int) error {
 
 var netlink netlinkOps = realNetlinkOps{}
 
-func init() {
-	registerSink(SinkAudit, auditSinkFactory{})
-}
-
-// auditSinkFactory implements [sinkFactory] for the kernel audit sink.
-type auditSinkFactory struct{}
-
-// Ensure [auditSinkFactory] implements [sinkFactory].
-var _ sinkFactory = auditSinkFactory{}
-
-// Open opens a netlink audit socket and returns an [auditWriter]
-// that sends each written payload as an AUDIT_TRUSTED_APP. The appID is
-// currently unused but accepted for sink factory compatibility.
-func (auditSinkFactory) Open(_ string) (io.Writer, error) {
+// OpenAuditWriter opens a netlink audit socket and returns an [AuditWriter]
+// that sends each written payload as an AUDIT_TRUSTED_APP. The returned
+// writer also implements [io.Closer].
+func OpenAuditWriter() (io.Writer, error) {
 	// SOCK_CLOEXEC prevents the fd from leaking to child processes.
-	fd, err := netlink.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, netlinkAudit)
+	fd, err := netlink.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, syscall.NETLINK_AUDIT)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open audit socket: %v", err)
 	}
-	addr := &syscall.SockaddrNetlink{
-		Family: syscall.AF_NETLINK,
-		Pid:    0, // let kernel assign port ID
-		Groups: 0,
-	}
-	if err := netlink.Bind(fd, addr); err != nil {
-		netlink.Close(fd)
-		return nil, fmt.Errorf("cannot bind audit socket: %v", err)
-	}
-	portID, err := getPortID(fd)
-	if err != nil {
-		netlink.Close(fd)
-		return nil, fmt.Errorf("cannot get audit socket port ID: %v", err)
-	}
-	return &auditWriter{fd: fd, portID: portID}, nil
+	return &AuditWriter{fd: fd}, nil
 }
 
-// getPortID returns the kernel-assigned port ID of the netlink socket.
-// When binding with Pid 0, the kernel assigns a unique port ID that may
-// or may not equal the process PID. This value must be used in outgoing
-// netlink message headers.
-func getPortID(fd int) (uint32, error) {
-	sa, err := netlink.Getsockname(fd)
-	if err != nil {
-		return 0, err
-	}
-	addr, ok := sa.(*syscall.SockaddrNetlink)
-	if !ok {
-		return 0, errors.New("unexpected socket address type")
-	}
-	return addr.Pid, nil
-}
-
-// auditWriter sends messages to the kernel audit subsystem via a netlink
+// AuditWriter sends messages to the kernel audit subsystem via a netlink
 // socket. Each Write call sends the payload as an AUDIT_TRUSTED_APP.
 //
 // The writer is safe for sequential use; concurrent use requires external
 // synchronization.
-type auditWriter struct {
-	fd     int
-	portID uint32
-	seq    atomic.Uint32
+type AuditWriter struct {
+	fd  int
+	seq atomic.Uint32
 }
 
-// Write sends p as the payload of an AUDIT_TRUSTED_APP netlink message.
+// Write sends payload as an AUDIT_TRUSTED_APP netlink message.
 // The returned byte count reflects only the original payload length.
-func (aw *auditWriter) Write(payload []byte) (int, error) {
+func (aw *AuditWriter) Write(payload []byte) (int, error) {
 	msg := aw.buildMessage(payload)
 	addr := &syscall.SockaddrNetlink{
 		Family: syscall.AF_NETLINK,
@@ -161,33 +97,28 @@ func (aw *auditWriter) Write(payload []byte) (int, error) {
 }
 
 // Close closes the underlying netlink socket.
-func (aw *auditWriter) Close() error {
+func (aw *AuditWriter) Close() error {
 	return netlink.Close(aw.fd)
 }
 
-// nlmsghdrSize is the size of a netlink message header in bytes
-// (uint32 + uint16 + uint16 + uint32 + uint32 = 16).
-const nlmsghdrSize = 16
-
-// buildMessage constructs a raw netlink AUDIT_TRUSTED_APP containing payload.
+// buildMessage constructs a raw netlink message containing the given payload.
 // The header layout follows struct nlmsghdr from
-// https://github.com/torvalds/linux/blob/master/include/uapi/linux/netlink.h#L45
-func (aw *auditWriter) buildMessage(payload []byte) []byte {
-	totalLen := nlmsghdrSize + uint32(len(payload))
+// https://github.com/torvalds/linux/blob/254f49634ee16a731174d2ae34bc50bd5f45e731/include/uapi/linux/netlink.h#L45
+func (aw *AuditWriter) buildMessage(payload []byte) []byte {
+	totalLen := syscall.SizeofNlMsghdr + uint32(len(payload))
 	buf := make([]byte, nlmsgAlign(totalLen))
 
 	// Write header in native byte order (netlink uses host endianness).
-	// NativeEndian is supported on all architectures snapd targets:
-	// amd64, arm, arm64, ppc64le, riscv64.
-	// See https://cs.opensource.google/go/go/+/refs/tags/go1.26.2:src/encoding/binary/native_endian_little.go
-	binary.NativeEndian.PutUint32(buf[0:4], totalLen)
-	binary.NativeEndian.PutUint16(buf[4:6], auditTrustedApp)
-	binary.NativeEndian.PutUint16(buf[6:8], syscall.NLM_F_REQUEST) // fire-and-forget, no ACK
-	binary.NativeEndian.PutUint32(buf[8:12], aw.seq.Add(1))
-	binary.NativeEndian.PutUint32(buf[12:16], aw.portID)
+	// TODO: Upgrade from fire-and-forget to use NLM_F_ACK and handle
+	// acknowledgments.
+	arch.Endian().PutUint32(buf[0:4], totalLen)
+	arch.Endian().PutUint16(buf[4:6], auditTrustedApp)
+	arch.Endian().PutUint16(buf[6:8], syscall.NLM_F_REQUEST) // fire-and-forget, no ACK
+	arch.Endian().PutUint32(buf[8:12], aw.seq.Add(1))
+	arch.Endian().PutUint32(buf[12:16], 0)
 
 	// Write payload.
-	copy(buf[nlmsghdrSize:], payload)
+	copy(buf[syscall.SizeofNlMsghdr:], payload)
 	return buf
 }
 

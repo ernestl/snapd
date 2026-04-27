@@ -19,28 +19,28 @@
 
 package seclog
 
-// nopLogger provides a no-operation [securityLogger] implementation.
+// nopLogger provides a no-operation [SecurityLogger] implementation.
 type nopLogger struct{}
 
-// Ensure [nopLogger] implements [securityLogger].
-var _ securityLogger = (*nopLogger)(nil)
+// Ensure [nopLogger] implements [SecurityLogger].
+var _ SecurityLogger = (*nopLogger)(nil)
 
-func newNopLogger() securityLogger {
+func NewNopLogger() SecurityLogger {
 	return nopLogger{}
 }
 
-// LogLoggingEnabled implements [securityLogger.LogLoggingEnabled].
-func (nopLogger) LogLoggingEnabled() {
+// LogLoggerEnabled implements [SecurityLogger.LogLoggerEnabled].
+func (nopLogger) LogLoggerEnabled() {
 }
 
-// LogLoggingDisabled implements [securityLogger.LogLoggingDisabled].
-func (nopLogger) LogLoggingDisabled() {
+// LogLoggerDisabled implements [SecurityLogger.LogLoggerDisabled].
+func (nopLogger) LogLoggerDisabled() {
 }
 
-// LogLoginSuccess implements [securityLogger.LogLoginSuccess].
+// LogLoginSuccess implements [SecurityLogger.LogLoginSuccess].
 func (nopLogger) LogLoginSuccess(user SnapdUser) {
 }
 
-// LogLoginFailure implements [securityLogger.LogLoginFailure].
+// LogLoginFailure implements [SecurityLogger.LogLoginFailure].
 func (nopLogger) LogLoginFailure(user SnapdUser, reason Reason) {
 }

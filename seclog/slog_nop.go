@@ -1,5 +1,9 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
-//go:build go1.21 && !noslog
+
+// Fallback for environments where log/slog is not available (Go < 1.21
+// or the noslog build tag is set). NewSlogLogger returns a nop logger
+// so that callers compile unconditionally.
+//go:build !go1.21 || noslog
 
 /*
  * Copyright (C) 2026 Canonical Ltd
@@ -20,8 +24,11 @@
 
 package seclog
 
-type (
-	SlogImplementation = slogImplementation
-	SlogLogger         = slogLogger
-	LevelWriter        = levelWriter
-)
+import "io"
+
+// NewSlogLogger returns a nop logger when log/slog is not available.
+// The writer, appID and minLevel parameters are accepted for API
+// compatibility but are ignored.
+func NewSlogLogger(_ io.Writer, _ string, _ Level) SecurityLogger {
+	return NewNopLogger()
+}

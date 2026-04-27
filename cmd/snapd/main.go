@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -33,6 +34,7 @@ import (
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/sandbox"
 	"github.com/snapcore/snapd/secboot"
+	"github.com/snapcore/snapd/seclog"
 	"github.com/snapcore/snapd/snapdenv"
 	"github.com/snapcore/snapd/snapdtool"
 	"github.com/snapcore/snapd/syscheck"
@@ -41,6 +43,13 @@ import (
 
 var (
 	syscheckCheckSystem = syscheck.CheckSystem
+	openAuditWriter     = seclog.OpenAuditWriter
+	newSlogLogger       = seclog.NewSlogLogger
+)
+
+const (
+	secLogAppID                 = "canonical.snapd.snapd"
+	secLogMinLevel seclog.Level = seclog.LevelInfo
 )
 
 func init() {
@@ -48,6 +57,10 @@ func init() {
 }
 
 func main() {
+	// Set up security logging via the audit subsystem.
+	teardown := setupSecurityLogging()
+	defer teardown()
+
 	// When preseeding re-exec is not used
 	if snapdenv.Preseeding() {
 		logger.Noticef("running for preseeding")
@@ -80,6 +93,23 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "cannot run daemon: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func setupSecurityLogging() (teardown func()) {
+	auditWriter, err := openAuditWriter()
+	if err != nil {
+		logger.Noticef("cannot set up security logger: %v", err)
+		return func() {}
+	}
+	sl := newSlogLogger(auditWriter, secLogAppID, secLogMinLevel)
+	seclog.Setup(sl)
+	seclog.LogLoggerEnabled()
+	return func() {
+		seclog.LogLoggerDisabled()
+		if closer, ok := auditWriter.(io.Closer); ok {
+			closer.Close()
+		}
 	}
 }
 
