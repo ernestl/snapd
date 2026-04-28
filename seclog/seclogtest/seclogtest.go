@@ -45,20 +45,13 @@ func NewMockSecurityLogger(buf *bytes.Buffer) *MockSecurityLogger {
 	return &MockSecurityLogger{buf: buf}
 }
 
-func (m *MockSecurityLogger) LogLoggerEnabled() {
-	fmt.Fprintln(m.buf, "sys_logging_enabled")
-}
-
-func (m *MockSecurityLogger) LogLoggerDisabled() {
-	fmt.Fprintln(m.buf, "sys_logging_disabled")
-}
-
-func (m *MockSecurityLogger) LogLoginSuccess(user seclog.SnapdUser) {
-	fmt.Fprintf(m.buf, "authn_login_success %s\n", user.String())
-}
-
-func (m *MockSecurityLogger) LogLoginFailure(user seclog.SnapdUser, reason seclog.Reason) {
-	fmt.Fprintf(m.buf, "authn_login_failure %s %s\n", user.String(), reason.String())
+// LogAny implements [seclog.SecurityLogger.LogAny].
+func (m *MockSecurityLogger) LogAny(event seclog.Event, description string, attrs ...seclog.Attr) {
+	fmt.Fprintf(m.buf, "%s %s", event.Name, description)
+	for _, a := range attrs {
+		fmt.Fprintf(m.buf, " [%s=%#v]", a.Key, a.Value)
+	}
+	fmt.Fprintln(m.buf)
 }
 
 // NewMockSlogLogger returns a buffer and a constructor function matching the

@@ -26,7 +26,6 @@ package seclog
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -59,50 +58,21 @@ type slogLogger struct {
 	logger *slog.Logger
 }
 
-// LogLoggerEnabled implements [SecurityLogger.LogLoggerEnabled].
-func (l *slogLogger) LogLoggerEnabled() {
-	l.logger.LogAttrs(
-		context.Background(),
-		slog.Level(LevelInfo),
-		"Security logging enabled",
-		slog.Attr{Key: "category", Value: slog.StringValue("SYS")},
-		slog.Attr{Key: "event", Value: slog.StringValue("sys_logging_enabled")},
+// LogAny implements [SecurityLogger.LogAny].
+func (l *slogLogger) LogAny(event Event, description string, attrs ...Attr) {
+	slogAttrs := make([]slog.Attr, 0, len(attrs)+2)
+	slogAttrs = append(slogAttrs,
+		slog.Attr{Key: "category", Value: slog.StringValue(event.Category)},
+		slog.Attr{Key: "event", Value: slog.StringValue(event.Name)},
 	)
-}
-
-// LogLoggerDisabled implements [SecurityLogger.LogLoggerDisabled].
-func (l *slogLogger) LogLoggerDisabled() {
+	for _, a := range attrs {
+		slogAttrs = append(slogAttrs, slog.Any(a.Key, a.Value))
+	}
 	l.logger.LogAttrs(
 		context.Background(),
-		slog.Level(LevelCritical),
-		"Security logging disabled",
-		slog.Attr{Key: "category", Value: slog.StringValue("SYS")},
-		slog.Attr{Key: "event", Value: slog.StringValue("sys_logging_disabled")},
-	)
-}
-
-// LogLoginSuccess implements [SecurityLogger.LogLoginSuccess].
-func (l *slogLogger) LogLoginSuccess(user SnapdUser) {
-	l.logger.LogAttrs(
-		context.Background(),
-		slog.Level(LevelInfo),
-		fmt.Sprintf("User %s login success", user.String()),
-		slog.Attr{Key: "category", Value: slog.StringValue("AUTHN")},
-		slog.Attr{Key: "event", Value: slog.StringValue("authn_login_success")},
-		slog.Any("user", user),
-	)
-}
-
-// LogLoginFailure implements [SecurityLogger.LogLoginFailure].
-func (l *slogLogger) LogLoginFailure(user SnapdUser, reason Reason) {
-	l.logger.LogAttrs(
-		context.Background(),
-		slog.Level(LevelWarn),
-		fmt.Sprintf("User %s login failure: %s", user.String(), reason.String()),
-		slog.Attr{Key: "category", Value: slog.StringValue("AUTHN")},
-		slog.Attr{Key: "event", Value: slog.StringValue("authn_login_failure")},
-		slog.Any("user", user),
-		slog.Any("error", reason),
+		slog.Level(event.Level),
+		description,
+		slogAttrs...,
 	)
 }
 

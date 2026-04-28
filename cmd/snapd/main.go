@@ -23,7 +23,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -107,9 +106,7 @@ func setupSecurityLogging() (teardown func()) {
 	seclog.LogLoggerEnabled()
 	return func() {
 		seclog.LogLoggerDisabled()
-		if closer, ok := auditWriter.(io.Closer); ok {
-			closer.Close()
-		}
+		auditWriter.Close()
 	}
 }
 

@@ -29,18 +29,6 @@ func NewNopLogger() SecurityLogger {
 	return nopLogger{}
 }
 
-// LogLoggerEnabled implements [SecurityLogger.LogLoggerEnabled].
-func (nopLogger) LogLoggerEnabled() {
-}
-
-// LogLoggerDisabled implements [SecurityLogger.LogLoggerDisabled].
-func (nopLogger) LogLoggerDisabled() {
-}
-
-// LogLoginSuccess implements [SecurityLogger.LogLoginSuccess].
-func (nopLogger) LogLoginSuccess(user SnapdUser) {
-}
-
-// LogLoginFailure implements [SecurityLogger.LogLoginFailure].
-func (nopLogger) LogLoginFailure(user SnapdUser, reason Reason) {
+// LogAny implements [SecurityLogger.LogAny].
+func (nopLogger) LogAny(event Event, description string, attrs ...Attr) {
 }

@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	. "gopkg.in/check.v1"
@@ -101,27 +102,30 @@ func orderedKeys(data []byte) ([]string, error) {
 	return keys, nil
 }
 
-func (s *SlogSuite) TestLogLoggerEnabled(c *C) {
+func (s *SlogSuite) TestLogAny(c *C) {
 	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
-	type sysEvent struct {
+	type record struct {
 		baseAttrs
 		Event string `json:"event"`
 	}
 
-	logger.LogLoggerEnabled()
+	logger.LogAny(
+		seclog.Event{Category: "TEST", Name: "test_event", Level: seclog.LevelInfo},
+		"Something happened",
+	)
 
-	var obtained sysEvent
+	var obtained record
 	err := json.Unmarshal(s.buf.Bytes(), &obtained)
 	c.Assert(err, IsNil)
 	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "INFO")
-	c.Check(obtained.Description, Equals, "Security logging enabled")
+	c.Check(obtained.Description, Equals, "Something happened")
 	c.Check(obtained.AppID, Equals, s.appID)
 	c.Check(obtained.Type, Equals, "security")
-	c.Check(obtained.Category, Equals, "SYS")
-	c.Check(obtained.Event, Equals, "sys_logging_enabled")
+	c.Check(obtained.Category, Equals, "TEST")
+	c.Check(obtained.Event, Equals, "test_event")
 
 	// verify key order for human readability
 	keys, err := orderedKeys(s.buf.Bytes())
@@ -132,116 +136,11 @@ func (s *SlogSuite) TestLogLoggerEnabled(c *C) {
 	})
 }
 
-func (s *SlogSuite) TestLogLoggerDisabled(c *C) {
+func (s *SlogSuite) TestLogAnyWithAttrs(c *C) {
 	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
 	c.Assert(logger, NotNil)
 
-	type sysEvent struct {
-		baseAttrs
-		Event string `json:"event"`
-	}
-
-	logger.LogLoggerDisabled()
-
-	var obtained sysEvent
-	err := json.Unmarshal(s.buf.Bytes(), &obtained)
-	c.Assert(err, IsNil)
-	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
-	c.Check(obtained.Level, Equals, "CRITICAL")
-	c.Check(obtained.Description, Equals, "Security logging disabled")
-	c.Check(obtained.AppID, Equals, s.appID)
-	c.Check(obtained.Type, Equals, "security")
-	c.Check(obtained.Category, Equals, "SYS")
-	c.Check(obtained.Event, Equals, "sys_logging_disabled")
-
-	// verify key order for human readability
-	keys, err := orderedKeys(s.buf.Bytes())
-	c.Assert(err, IsNil)
-	c.Check(keys, DeepEquals, []string{
-		"datetime", "level", "description",
-		"app_id", "type", "category", "event",
-	})
-}
-
-func (s *SlogSuite) TestLogLoginSuccess(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
-	c.Assert(logger, NotNil)
-
-	type LoginSuccess struct {
-		baseAttrs
-		Event string `json:"event"`
-		User  struct {
-			ID             int64  `json:"snapd-user-id"`
-			StoreUserName  string `json:"store-user-name"`
-			StoreUserEmail string `json:"store-user-email"`
-			Expiration     string `json:"expiration"`
-		} `json:"user"`
-	}
-
-	user := seclog.SnapdUser{
-		ID:             42,
-		StoreUserEmail: "user@gmail.com",
-		StoreUserName:  "jdoe",
-	}
-	logger.LogLoginSuccess(user)
-
-	var obtained LoginSuccess
-	err := json.Unmarshal(s.buf.Bytes(), &obtained)
-	c.Assert(err, IsNil)
-	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
-	c.Check(obtained.Level, Equals, "INFO")
-	c.Check(obtained.Description, Equals, "User 42:user@gmail.com:jdoe login success")
-	c.Check(obtained.AppID, Equals, s.appID)
-	c.Check(obtained.Event, Equals, "authn_login_success")
-	c.Check(obtained.User.ID, Equals, int64(42))
-	c.Check(obtained.User.StoreUserEmail, Equals, "user@gmail.com")
-	c.Check(obtained.User.StoreUserName, Equals, "jdoe")
-	c.Check(obtained.User.Expiration, Equals, "never")
-
-	// verify key order for human readability
-	keys, err := orderedKeys(s.buf.Bytes())
-	c.Assert(err, IsNil)
-	c.Check(keys, DeepEquals, []string{
-		"datetime", "level", "description",
-		"app_id", "type", "category", "event", "user",
-	})
-}
-
-func (s *SlogSuite) TestLogLoginSuccessWithExpiration(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
-	c.Assert(logger, NotNil)
-
-	type LoginSuccess struct {
-		baseAttrs
-		Event string `json:"event"`
-		User  struct {
-			ID             int64  `json:"snapd-user-id"`
-			StoreUserName  string `json:"store-user-name"`
-			StoreUserEmail string `json:"store-user-email"`
-			Expiration     string `json:"expiration"`
-		} `json:"user"`
-	}
-
-	expiry := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
-	user := seclog.SnapdUser{
-		ID:             42,
-		StoreUserEmail: "user@gmail.com",
-		StoreUserName:  "jdoe",
-		Expiration:     expiry,
-	}
-	logger.LogLoginSuccess(user)
-
-	var obtained LoginSuccess
-	err := json.Unmarshal(s.buf.Bytes(), &obtained)
-	c.Assert(err, IsNil)
-	c.Check(obtained.User.Expiration, Equals, "2026-06-15T12:00:00Z")
-}
-
-func (s *SlogSuite) TestLogLoginFailure(c *C) {
-	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
-	c.Assert(logger, NotNil)
-
-	type loginFailure struct {
+	type record struct {
 		baseAttrs
 		Event string `json:"event"`
 		User  struct {
@@ -261,20 +160,31 @@ func (s *SlogSuite) TestLogLoginFailure(c *C) {
 		StoreUserEmail: "user@gmail.com",
 		StoreUserName:  "jdoe",
 	}
-	logger.LogLoginFailure(user, seclog.Reason{Code: seclog.ReasonInvalidCredentials, Message: "invalid credentials"})
+	reason := seclog.Reason{Code: seclog.ReasonInvalidCredentials, Message: "invalid credentials"}
+	logger.LogAny(
+		seclog.Event{Category: "TEST", Name: "test_event", Level: seclog.LevelWarn},
+		fmt.Sprintf("User %s caused an issue: %s", user.String(), reason.String()),
+		seclog.Attr{Key: "user", Value: user},
+		seclog.Attr{Key: "error", Value: reason},
+	)
 
-	var obtained loginFailure
+	var obtained record
 	err := json.Unmarshal(s.buf.Bytes(), &obtained)
 	c.Assert(err, IsNil)
 	c.Check(time.Since(obtained.Datetime) < time.Second, Equals, true)
 	c.Check(obtained.Level, Equals, "WARN")
-	c.Check(obtained.Description, Equals, "User 42:user@gmail.com:jdoe login failure: invalid-credentials:invalid credentials")
+	c.Check(obtained.Description, Equals,
+		"User 42:user@gmail.com:jdoe caused an issue: invalid-credentials:invalid credentials")
 	c.Check(obtained.AppID, Equals, s.appID)
-	c.Check(obtained.Event, Equals, "authn_login_failure")
+	c.Check(obtained.Type, Equals, "security")
+	c.Check(obtained.Category, Equals, "TEST")
+	c.Check(obtained.Event, Equals, "test_event")
+	// SnapdUser is a LogValuer — verify structured output
 	c.Check(obtained.User.ID, Equals, int64(42))
 	c.Check(obtained.User.StoreUserEmail, Equals, "user@gmail.com")
 	c.Check(obtained.User.StoreUserName, Equals, "jdoe")
 	c.Check(obtained.User.Expiration, Equals, "never")
+	// Reason is a plain struct — verify JSON marshaling via slog.Any
 	c.Check(obtained.Error.Code, Equals, seclog.ReasonInvalidCredentials)
 	c.Check(obtained.Error.Message, Equals, "invalid credentials")
 
@@ -287,15 +197,48 @@ func (s *SlogSuite) TestLogLoginFailure(c *C) {
 	})
 }
 
+func (s *SlogSuite) TestLogAnyWithLogValuer(c *C) {
+	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelInfo)
+	c.Assert(logger, NotNil)
+
+	type record struct {
+		User struct {
+			Expiration string `json:"expiration"`
+		} `json:"user"`
+	}
+
+	expiry := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	user := seclog.SnapdUser{
+		ID:         42,
+		Expiration: expiry,
+	}
+	logger.LogAny(
+		seclog.Event{Category: "TEST", Name: "test_event", Level: seclog.LevelInfo},
+		"test",
+		seclog.Attr{Key: "user", Value: user},
+	)
+
+	var obtained record
+	err := json.Unmarshal(s.buf.Bytes(), &obtained)
+	c.Assert(err, IsNil)
+	c.Check(obtained.User.Expiration, Equals, "2026-06-15T12:00:00Z")
+}
+
 func (s *SlogSuite) TestLevelFiltering(c *C) {
 	logger := seclog.NewSlogLogger(s.buf, s.appID, seclog.LevelWarn)
 	c.Assert(logger, NotNil)
 
 	// LevelInfo is below LevelWarn — should be filtered out
-	logger.LogLoggerEnabled()
+	logger.LogAny(
+		seclog.Event{Category: "TEST", Name: "test_event", Level: seclog.LevelInfo},
+		"Should be filtered",
+	)
 	c.Check(s.buf.Len(), Equals, 0)
 
 	// LevelWarn meets the threshold — should be emitted
-	logger.LogLoginFailure(seclog.SnapdUser{ID: 1}, seclog.Reason{Code: seclog.ReasonInternal, Message: "test"})
+	logger.LogAny(
+		seclog.Event{Category: "TEST", Name: "test_event", Level: seclog.LevelWarn},
+		"Should pass",
+	)
 	c.Check(s.buf.Len() > 0, Equals, true)
 }

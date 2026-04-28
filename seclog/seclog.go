@@ -135,13 +135,28 @@ func (r Reason) String() string {
 	return code + ":" + message
 }
 
+// Event describes a structured security audit event.
+//
+// A Version field may be added in the future if a log aggregator or
+// consumer requires explicit schema versioning.
+type Event struct {
+	Category string `json:"category"`
+	Name     string `json:"event"`
+	Level    Level  `json:"level"`
+}
+
+// Attr is a key-value pair attached to a security log event.
+type Attr struct {
+	Key   string
+	Value any
+}
+
 // SecurityLogger defines the interface for emitting structured security
-// audit events.
+// audit events. Implementations receive a fully described [Event] and
+// optional [Attr] values, so new event types can be added without
+// changing the interface.
 type SecurityLogger interface {
-	LogLoggerEnabled()
-	LogLoggerDisabled()
-	LogLoginSuccess(user SnapdUser)
-	LogLoginFailure(user SnapdUser, reason Reason)
+	LogAny(event Event, description string, attrs ...Attr)
 }
 
 var (
@@ -166,7 +181,10 @@ func LogLoggerEnabled() {
 	defer lock.Unlock()
 
 	logger.Noticef("security logger enabled")
-	globalLogger.LogLoggerEnabled()
+	globalLogger.LogAny(
+		Event{Category: "SYS", Name: "sys_logging_enabled", Level: LevelInfo},
+		"Security logging enabled",
+	)
 }
 
 // LogLoggerDisabled logs that the security logger has been disabled.
@@ -175,7 +193,10 @@ func LogLoggerDisabled() {
 	defer lock.Unlock()
 
 	logger.Noticef("security logger disabled")
-	globalLogger.LogLoggerDisabled()
+	globalLogger.LogAny(
+		Event{Category: "SYS", Name: "sys_logging_disabled", Level: LevelCritical},
+		"Security logging disabled",
+	)
 }
 
 // LogLoginSuccess logs a successful login using the global security logger.
@@ -183,7 +204,11 @@ func LogLoginSuccess(user SnapdUser) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	globalLogger.LogLoginSuccess(user)
+	globalLogger.LogAny(
+		Event{Category: "AUTHN", Name: "authn_login_success", Level: LevelInfo},
+		fmt.Sprintf("User %s login success", user.String()),
+		Attr{Key: "user", Value: user},
+	)
 }
 
 // LogLoginFailure logs a failed login attempt using the global security logger.
@@ -191,5 +216,10 @@ func LogLoginFailure(user SnapdUser, reason Reason) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	globalLogger.LogLoginFailure(user, reason)
+	globalLogger.LogAny(
+		Event{Category: "AUTHN", Name: "authn_login_failure", Level: LevelWarn},
+		fmt.Sprintf("User %s login failure: %s", user.String(), reason.String()),
+		Attr{Key: "user", Value: user},
+		Attr{Key: "error", Value: reason},
+	)
 }

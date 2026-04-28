@@ -135,8 +135,11 @@ func (s *snapdSuite) TestSetupSecurityLoggingSuccess(c *C) {
 	logbuf, restore := logger.MockLogger()
 	defer restore()
 
-	restore = snapd.MockOpenAuditWriter(func() (io.Writer, error) {
-		return &bytes.Buffer{}, nil
+	restore = snapd.MockOpenAuditWriter(func() (io.WriteCloser, error) {
+		return struct {
+			*bytes.Buffer
+			io.Closer
+		}{&bytes.Buffer{}, io.NopCloser(nil)}, nil
 	})
 	defer restore()
 
@@ -163,7 +166,7 @@ func (s *snapdSuite) TestSetupSecurityLoggingAuditWriterError(c *C) {
 	logbuf, restore := logger.MockLogger()
 	defer restore()
 
-	restore = snapd.MockOpenAuditWriter(func() (io.Writer, error) {
+	restore = snapd.MockOpenAuditWriter(func() (io.WriteCloser, error) {
 		return nil, fmt.Errorf("permission denied")
 	})
 	defer restore()

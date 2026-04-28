@@ -45,7 +45,10 @@ func (s *NopSuite) TestLogLoggerEnabled(c *C) {
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoggerEnabled()
+	logger.LogAny(
+		seclog.Event{Category: "SYS", Name: "sys_logging_enabled", Level: seclog.LevelInfo},
+		"Security logging enabled",
+	)
 }
 
 func (s *NopSuite) TestLogLoggerDisabled(c *C) {
@@ -53,7 +56,10 @@ func (s *NopSuite) TestLogLoggerDisabled(c *C) {
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoggerDisabled()
+	logger.LogAny(
+		seclog.Event{Category: "SYS", Name: "sys_logging_disabled", Level: seclog.LevelCritical},
+		"Security logging disabled",
+	)
 }
 
 func (s *NopSuite) TestLogLoginSuccess(c *C) {
@@ -61,7 +67,11 @@ func (s *NopSuite) TestLogLoginSuccess(c *C) {
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoginSuccess(seclog.SnapdUser{StoreUserEmail: "user@gmail.com"})
+	logger.LogAny(
+		seclog.Event{Category: "AUTHN", Name: "authn_login_success", Level: seclog.LevelInfo},
+		"test",
+		seclog.Attr{Key: "user", Value: seclog.SnapdUser{StoreUserEmail: "user@gmail.com"}},
+	)
 }
 
 func (s *NopSuite) TestLogLoginFailure(c *C) {
@@ -69,5 +79,10 @@ func (s *NopSuite) TestLogLoginFailure(c *C) {
 	c.Assert(logger, NotNil)
 
 	// nop logger discards all messages without error
-	logger.LogLoginFailure(seclog.SnapdUser{StoreUserEmail: "user@gmail.com"}, seclog.Reason{})
+	logger.LogAny(
+		seclog.Event{Category: "AUTHN", Name: "authn_login_failure", Level: seclog.LevelWarn},
+		"test",
+		seclog.Attr{Key: "user", Value: seclog.SnapdUser{StoreUserEmail: "user@gmail.com"}},
+		seclog.Attr{Key: "error", Value: seclog.Reason{}},
+	)
 }
