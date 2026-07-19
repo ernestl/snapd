@@ -365,3 +365,14 @@ func (iface *myInterface) BeforePreparePlug(plug *snap.PlugInfo) error {
 4. **Conflicts prevent concurrent ops**: Check `snapstate/conflict.go` for snap operation serialization
 5. **Backend abstraction**: Use `snapstate/backend` for disk state, never manipulate directly
 6. **Interface security profiles are additive**: Each connected interface adds to AppArmor/seccomp profiles
+
+## Cursor Cloud specific instructions
+
+The dependency-refresh update script only runs `go mod download`. Everything else below is set up once in the VM snapshot (apt build deps such as `libseccomp-dev`, `libcap-dev`, `libapparmor-dev`, `libudev-dev`, `libfuse3-dev`, `xfslibs-dev`, autotools, `golangci-lint` in `~/go/bin`). Assume the toolchain is present; do not reinstall system packages.
+
+- **Build/test/lint** work natively here. Prefix test runs with `LANG=C.UTF-8` (some tests fail on other locales). `golangci-lint` lives in `$(go env GOPATH)/bin` — add it to `PATH` or let `./run-checks` auto-install/find it. `./run-checks --unit` and `--static` both work; the full `./run-checks` also runs the C parts (needs `cmd/autogen.sh`).
+- **Running the real `snapd` daemon in this container** works only in *degraded/devmode*: the container has no AppArmor kernel module and no `/var/lib/snapd/snap` mount infrastructure, so `syscheck` fails and any *state-changing* op (e.g. `snap install`) is rejected with "system does not fully support snapd". Read-only REST calls and store queries DO work.
+  - Steps: `go build -o /tmp/build ./...`, then copy the Go helpers snapd needs at startup into the libexec dir once: `sudo cp /tmp/build/{snap-seccomp,snap-exec,snap-update-ns,snap-failure,snapctl,snap-repair,snap-bootstrap,snap-preseed,snapd-apparmor} /usr/lib/snapd/` (missing `snap-seccomp` there causes a startup error). `snap-confine`/`snap-discard-ns` are C binaries (build via `cd cmd && ./autogen.sh && make`) and are not needed for REST-only testing.
+  - Start it with standby disabled or it self-exits when idle (expects systemd socket activation): `sudo SNAPD_STANDBY_WAIT=1h SNAPD_DEBUG=1 /tmp/build/snapd`. It listens on `/run/snapd.socket`.
+  - Then use the client against it: `/tmp/build/snap version`, `/tmp/build/snap debug api /v2/system-info`, `/tmp/build/snap find hello` (live store query).
+- **Full snap install / interface / confinement behavior** cannot be exercised natively here — use the spread integration tests in a VM instead (`./run-spread garden:...`, see the `build-snapd-snap` and `run-spread-test` skills).
