@@ -84,7 +84,7 @@ and working system.
 If any tests need to be added for a PR to be merged it will be denoted
 during the review process.
 
-See [Testing](HACKING.md#user-content-testing) for further details on running
+See [Testing](docs/hacking/unit-tests.md) for further details on running
 tests.
 
 ## Pull request guidelines
