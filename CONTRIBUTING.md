@@ -15,6 +15,27 @@ https://ubuntu.com/legal/contributors
 If you have any questions, please reach out to us on our forum:
 https://forum.snapcraft.io/c/snapd/5
 
+## Getting started
+
+Clone the tree and install build dependencies:
+[docs/hacking/setup.md](docs/hacking/setup.md). The human index for building,
+testing, and debugging is [HACKING.md](HACKING.md). How to write Go is
+[CODING.md](CODING.md).
+
+## Why reviews?
+
+Reviews can give input on whether the proposed code is seemingly correct and
+reasonable in the context of project practices, and whether it seems
+sufficiently tested.
+
+Code can have a long lifetime; the effort to maintain and adapt it in the
+future can be much larger than the original effort to produce the first version
+of it. Reviews from other team members should therefore focus on:
+
+* Is the new code readable and understandable, alongside other attributes that
+  can help future maintainability?
+* Could the code be simplified?
+
 ## Contributor guidelines
 
 Prefer small PRs, do not mix trivial with controversial changes, write tests,
@@ -22,8 +43,6 @@ and do not force-push after a PR has been reviewed (force-push is OK when ready
 to merge). Commit emails must be ASCII.
 
 Full guidance: [docs/contributing/guidelines.md](docs/contributing/guidelines.md).
-
-For coding conventions, including how to format a PR, see [CODING.md](CODING.md).
 
 ### External and AI-assisted contributions
 
@@ -47,44 +66,17 @@ We might simply reject scattershot or overly large PRs.
 
 Coding agents should follow [`AGENTS.md`](AGENTS.md). Thin adapters exist for
 Copilot, Claude Code, and Gemini CLI; do not duplicate those rules elsewhere.
-Humans still follow this file, [`CODING.md`](CODING.md), and the topic files
-under [`docs/coding/`](docs/coding/) and
-[`docs/contributing/`](docs/contributing/).
+Humans still follow this file, [`CODING.md`](CODING.md), [`HACKING.md`](HACKING.md),
+and the topic files under [`docs/contributing/`](docs/contributing/),
+[`docs/coding/`](docs/coding/), and [`docs/hacking/`](docs/hacking/).
 
 ## Pull requests and tests
 
-Before merging any changes into the snapd codebase, we need to verify that the
-proposed functionality and code quality does not degrade the functionality and
-quality requirement we've set for the project.
+CI runs static checks, unit tests, and spread integration tests on every PR.
+Tests are not required to open a PR, but we rarely merge without them (we may
+write them on your behalf). Reviewers will say if tests are still needed.
 
-For each PR, we run checks in three different groups: static, unit and spread.
-
-Static tests use several code analysis tools present in the golang ecosystem
-(go vet, go lint and go fmt) to make sure that the code always aligns with
-the standards. They also check the markdown format of documentation files.
-
-All the existing unit tests are also executed, and the coverage info is
-reported to coveralls.
-
-We use [spread](https://github.com/canonical/spread-plus) to verify the
-integrity of the product, exercising it as a whole, both from an end user
-standpoint (eg. all kinds of interactions with the snap tool from the command
-line) and from a more systemic approach (testing upgrades, for instance).
-
-Spread and unit tests are not strictly a requirement for a PR to be submitted,
-but we do strongly encourage contributors to include them. We rarely merge code
-without tests although we may occasionally write them ourselves on behalf of
-a contributor.
-
-Unit tests help us understand expected behaviour, verified through the tests
-and review process, which ensures we're building on the solid base of a tested
-and working system.
-
-If any tests need to be added for a PR to be merged it will be denoted
-during the review process.
-
-See [Testing](docs/hacking/unit-tests.md) for further details on running
-tests.
+How to run tests: [docs/hacking/unit-tests.md](docs/hacking/unit-tests.md).
 
 ## Pull request guidelines
 
@@ -95,7 +87,7 @@ How to open and update a PR:
 [docs/contributing/pull-requests.md](docs/contributing/pull-requests.md).
 
 How to slice the diff, title it, and merge:
-[docs/coding/prs.md](docs/coding/prs.md).
+[docs/contributing/prs.md](docs/contributing/prs.md).
 
 ### Labels
 

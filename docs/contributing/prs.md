@@ -1,5 +1,8 @@
 # PRs and refactorings
 
+GitHub workflow (fork, drafts, force-push, two approvals):
+[pull-requests.md](pull-requests.md).
+
 * PR should ideally have diffs of around 500 lines or less. There might be exceptions when size is due to large repetitive tests, but not for the production code. Experience indicates that smaller PRs are easier to review, while it is hard to do careful and punctual reviews for very large diffs.
 
 * It is fair for reviewers to ask for large PRs to be split. It is also fair to ask for discussion on best strategies to do this with colleagues and architects.

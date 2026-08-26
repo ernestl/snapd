@@ -13,7 +13,7 @@ Contributors can help us by observing the following guidelines:
 - Try to write tests to cover the contributed changes (see
   [Pull requests and tests](../../CONTRIBUTING.md#pull-requests-and-tests))
 
-For further details on our coding conventions, including how to format a PR,
-see [CODING.md](../../CODING.md).
+For coding conventions see [CODING.md](../../CODING.md). For how to slice,
+title, and merge a PR see [prs.md](prs.md).
 
 [git-force]: https://git-scm.com/docs/git-push#Documentation/git-push.txt---force
