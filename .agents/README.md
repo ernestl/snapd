@@ -8,8 +8,9 @@ rules live in the repository root, not here.
 | Path | Role |
 |---|---|
 | [`AGENTS.md`](../AGENTS.md) | Always-on agent guide: architecture map, locking, commands, conventions, boundaries |
-| [`CODING.md`](../CODING.md), [`HACKING.md`](../HACKING.md) | Human indexes with short landings |
+| [`CODING.md`](../CODING.md), [`HACKING.md`](../HACKING.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Human indexes with short landings |
 | [`docs/coding/`](../docs/coding/) | Coding/review topics (errors, tests, PRs, …) |
+| [`docs/contributing/`](../docs/contributing/) | Contributor guidelines and PR workflow |
 | [`docs/hacking/`](../docs/hacking/) | Developer setup and build topics |
 | [`interfaces/AGENTS.md`](../interfaces/AGENTS.md) | Interface how-to, loaded when working under `interfaces/` |
 | [`interfaces/CLAUDE.md`](../interfaces/CLAUDE.md) | `@AGENTS.md` so Claude Code loads the nested file |
@@ -44,9 +45,9 @@ the spread skill.
 
 ## Maintaining this
 
-- Change a convention in the topic file (`docs/coding/` or `docs/hacking/`) in
-  the same PR as the code that depends on it. Update the one-line reminder in
-  `AGENTS.md` only if the always-on rule changed.
+- Change a convention in the topic file (`docs/coding/`, `docs/contributing/`,
+  or `docs/hacking/`) in the same PR as the code that depends on it. Update the
+  one-line reminder in `AGENTS.md` only if the always-on rule changed.
 - Do not grow root `AGENTS.md` with long samples or essays.
 - Nested `AGENTS.md` is for package-specific checklists. For Claude Code, add a
   sibling `CLAUDE.md` containing `@AGENTS.md`.

@@ -81,6 +81,7 @@ garden backend): `docs/hacking/spread.md`. Test snapd snap artifact:
 
 Keep these always-on. Long form: `docs/coding/errors.md`, `docs/coding/tests.md`,
 `docs/coding/spread-tests.md`, `docs/coding/prs.md`, `docs/coding/naming.md`.
+PR process: `docs/contributing/guidelines.md`, `docs/contributing/pull-requests.md`.
 
 - `gofmt -s` (enforced by `./run-checks`)
 - Errors: lowercase, no period, `"cannot X"` not `"failed to X"`; prefix unexpected
@@ -121,7 +122,8 @@ spread: remove old release of distribution
 
 - Prefer "Squash and Merge"; rebase only when history is valuable; never a merge commit
 - Separate refactoring from behavior changes; refactoring must not touch tests unless unavoidable
-- Details: `docs/coding/prs.md`
+- Diff size, titles, merge: `docs/coding/prs.md`
+- PR workflow (drafts, force-push, two approvals): `docs/contributing/pull-requests.md`
 
 ## Debugging
 
@@ -137,8 +139,9 @@ More: `docs/hacking/debug-daemon.md`. Nested VMs: `docs/hacking/nested-tests.md`
 ## Key files
 
 - `ARCHITECTURE.md`, `overlord/README.md`, `spread.yaml`
-- `CODING.md` and `HACKING.md` are human indexes; open the topic file for the task
+- `CODING.md`, `HACKING.md`, and `CONTRIBUTING.md` are human indexes; open the topic file for the task
 - `docs/coding/` (naming, errors, structure, tests, spread `task.yaml`, PRs)
+- `docs/contributing/` (guidelines, PR workflow)
 - `docs/hacking/` (setup, snapcraft, native build, unit tests, spread setup)
 - `interfaces/AGENTS.md` and `interfaces/builtin/README.md` when changing interfaces
 - Manager cache: `state.State.Cache()` with private keys
