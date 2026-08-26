@@ -1,12 +1,7 @@
-# Coding/Review checklist
+# Coding checklist
 
-## Why reviews?
-
-* Reviews can give input on whether the proposed code is seemingly correct and reasonable in the context of project practices, and whether it seems sufficiently tested.
-
-* Code can have a long lifetime; the effort to maintain and adapt it in the future can be much larger than the original effort to produce the first version of it. Reviews from other team members should therefore focus on:
-  * Is the new code readable and understandable, alongside other attributes that can help future maintainability?
-  * Could the code be simplified?
+How to participate in the project (CLA, reviews, pull requests):
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Naming conventions
 
@@ -35,12 +30,6 @@ We use gocheck (not stdlib `testing`, except benchmarks), prefer `_test` package
 Externally visible behaviour should have [spread](https://github.com/canonical/spread-plus) tests. `task.yaml` section order is enforced by CI (`summary` and `details` required, `execute` last).
 
 Full guidance: [docs/coding/spread-tests.md](docs/coding/spread-tests.md).
-
-## PRs and refactorings
-
-Keep diffs around 500 lines or less, separate refactoring from behaviour changes, and do not mix test changes into refactors unless unavoidable. PR titles look like `package: short summary in lowercase`. Prefer squash-and-merge.
-
-Full guidance: [docs/coding/prs.md](docs/coding/prs.md).
 
 ## Further readings
 

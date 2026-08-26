@@ -35,7 +35,7 @@ Two approvals are required for a PR to be merged. A PR can then be merged into t
 After approval, you can rework the branch history as you see fit. Consider
 squashing commits from the original PR with those made during the review
 process, for example. Commit messages should follow the format described in
-[CODING.md](../../CODING.md). A [force push][git-force] will be required if you
+[prs.md](prs.md). A [force push][git-force] will be required if you
 rework the history.
 
 Start a [rebase][github-rebase] from the original parent commit of your first
@@ -46,7 +46,7 @@ changes, making the verification more confusing.
 Merge using GitHub's [Squash and Merge][github-squash-merge] or [Rebase and
 merge][github-rebase-merge], never [Create a merge
 commit][github-merge-commit]. Details, including when to rebase-merge:
-[docs/coding/prs.md](../coding/prs.md).
+[prs.md](prs.md).
 
 [pull-request]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork
 [fork]: https://docs.github.com/en/get-started/quickstart/fork-a-repo#forking-a-repository

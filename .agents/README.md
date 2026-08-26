@@ -9,8 +9,8 @@ rules live in the repository root, not here.
 |---|---|
 | [`AGENTS.md`](../AGENTS.md) | Always-on agent guide: architecture map, locking, commands, conventions, boundaries |
 | [`CODING.md`](../CODING.md), [`HACKING.md`](../HACKING.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Human indexes with short landings |
-| [`docs/coding/`](../docs/coding/) | Coding/review topics (errors, tests, PRs, …) |
-| [`docs/contributing/`](../docs/contributing/) | Contributor guidelines and PR workflow |
+| [`docs/coding/`](../docs/coding/) | How to write Go (errors, tests, `task.yaml`, …) |
+| [`docs/contributing/`](../docs/contributing/) | How to participate (guidelines, PR workflow, titles, merge) |
 | [`docs/hacking/`](../docs/hacking/) | Developer setup and build topics |
 | [`interfaces/AGENTS.md`](../interfaces/AGENTS.md) | Interface how-to, loaded when working under `interfaces/` |
 | [`interfaces/CLAUDE.md`](../interfaces/CLAUDE.md) | `@AGENTS.md` so Claude Code loads the nested file |
