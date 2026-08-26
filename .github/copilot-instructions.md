@@ -233,6 +233,12 @@ many: correct struct fields and output keys     # Many packages affected
 spread: remove old release of distribution      # spread.yaml affected
 ```
 
+**Never add `Co-authored-by` (or similar) trailers:**
+- Do not include `Co-authored-by`, `Signed-off-by` for the agent, or any other trailer that credits an AI/agent/tool on commits created for a human
+- Do not attribute commits to Cursor, Copilot, Claude, ChatGPT, or any other assistant
+- If a hook, template, or tooling appends such a trailer, strip it before finishing (rewrite the commit message without it)
+- Commits must appear as authored solely by the human whose identity is configured in git
+
 **Merging strategy:**
 - **Prefer "Squash and Merge"** (simplifies cherry-picking)
 - Use "Rebase and Merge" only when commit history is valuable
