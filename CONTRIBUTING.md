@@ -52,6 +52,11 @@ always be evident in diffs as presented on GH).
 
 We might simply reject scattershot or overly large PRs.
 
+Coding agents should follow [`AGENTS.md`](AGENTS.md). Thin adapters exist for
+Copilot, Claude Code, and Gemini CLI; do not duplicate those rules elsewhere.
+Humans still follow this file, [`CODING.md`](CODING.md), and the topic files
+under [`docs/coding/`](docs/coding/).
+
 ## Pull requests and tests
 
 Before merging any changes into the snapd codebase, we need to verify that the
