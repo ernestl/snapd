@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract tagged code snippets from HACKING.md for testing.
+"""Extract tagged code snippets from markdown for testing.
 
 Usage:
     extract-snippets.py MARKDOWN_FILE TAG [TAG...]
@@ -26,7 +26,7 @@ def extract_snippets(filename: str, tags: List[str]) -> Dict[str, str]:
         pattern = rf"<!--\s*test:{re.escape(tag)}\s*-->\s*\n```[^\n]*\n(.*?)\n```"
         matches = re.findall(pattern, content, re.DOTALL)
 
-        # Also try to match indented code blocks (HACKING.md uses both styles)
+        # Also try to match indented code blocks (docs use both styles)
         if not matches:
             # Match: <!-- test:TAG -->\n    code\n    code\n\n
             pattern = rf"<!--\s*test:{re.escape(tag)}\s*-->\s*\n((?:    .*\n)+)"
