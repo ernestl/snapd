@@ -382,6 +382,18 @@ func (b *Backend) setupHostAppArmorForCoreAndSnapd(appSet *interfaces.SnapAppSet
 	snapName := appSet.InstanceName()
 	snapInfo := appSet.Info()
 
+	// Remember core/snapd so later profile generation (e.g. for
+	// devmode snaps) can pick the right snap-confine transition
+	// target without requiring a snapd restart. These were historically
+	// only captured at Initialize() time, which made first-boot seeding
+	// panic when a devmode snap was in the seed.
+	switch snapInfo.Type() {
+	case snap.TypeOS:
+		b.coreSnap = snapInfo
+	case snap.TypeSnapd:
+		b.snapdSnap = snapInfo
+	}
+
 	// core on classic is special
 	if snapName == "core" && release.OnClassic && apparmor_sandbox.ProbedLevel() != apparmor_sandbox.Unsupported {
 		if err := b.setupSnapConfineReexec(snapInfo); err != nil {
@@ -848,22 +860,11 @@ func (b *Backend) addContent(securityTag string, snapInfo *snap.Info, cmdName st
 				}
 
 			default:
-				// neither of the snaps are installed
-
-				// TODO: this panic is unfortunate, but we don't have time
-				// to do any better for this security release
-				// It is actually important that we panic here, the only
-				// known circumstance where this happens is when we are
-				// seeding during first boot of UC16 with a very new core
-				// snap (i.e. with the security fix of 2.54.3) and also have
-				// a devmode confined snap in the seed to prepare. In this
-				// situation, when we panic(), we force snapd to exit, and
-				// systemd will restart us and we actually recover the
-				// initial seed change and continue on. This code will be
-				// removed/adapted before it is merged to the main branch,
-				// it is only meant to exist on the security release branch.
-				msg := fmt.Sprintf("neither snapd nor core snap available while preparing apparmor profile for devmode snap %s, panicking to restart snapd to continue seeding", snapInfo.InstanceName())
-				panic(msg)
+				// neither snapd nor core is known yet. This can happen on
+				// classic with only the distro package, or very early during
+				// seeding before those snaps have been set up. Use the host
+				// snap-confine profile, same as when only core is present.
+				usrLibSnapdConfineTransitionTarget = "/usr/lib/snapd/snap-confine"
 			}
 
 			// We use Pxr for all these rules since the snap-confine profile
