@@ -15,22 +15,34 @@ https://ubuntu.com/legal/contributors
 If you have any questions, please reach out to us on our forum:
 https://forum.snapcraft.io/c/snapd/5
 
+## Getting started
+
+Clone the tree and install build dependencies:
+[docs/hacking/setup.md](docs/hacking/setup.md). The human index for building,
+testing, and debugging is [HACKING.md](HACKING.md). How to write Go is
+[CODING.md](CODING.md).
+
+## Why reviews?
+
+Reviews can give input on whether the proposed code is seemingly correct and
+reasonable in the context of project practices, and whether it seems
+sufficiently tested.
+
+Code can have a long lifetime; the effort to maintain and adapt it in the
+future can be much larger than the original effort to produce the first version
+of it. Reviews from other team members should therefore focus on:
+
+* Is the new code readable and understandable, alongside other attributes that
+  can help future maintainability?
+* Could the code be simplified?
+
 ## Contributor guidelines
 
-Contributors can help us by observing the following guidelines:
+Prefer small PRs, do not mix trivial with controversial changes, write tests,
+and do not force-push after a PR has been reviewed (force-push is OK when ready
+to merge). Commit emails must be ASCII.
 
-- Commit messages should be well structured.
-- Commit emails should not include non-ASCII characters.
-- Several smaller PRs are better than one large PR.
-- Try not to mix potentially controversial and trivial changes together.
-  (Proposing trivial changes separately makes landing them easier and 
-  makes reviewing controversial changes simpler)
-- Do not [force push][git-force] a PR after it has received reviews. It is
-  acceptable to force push when a PR is ready to merge, however.
-- Try to write tests to cover the contributed changes (see below)
-
-For further details on our coding conventions, including how to format a PR,
-see [CODING.md](CODING.md).
+Full guidance: [docs/contributing/guidelines.md](docs/contributing/guidelines.md).
 
 ### External and AI-assisted contributions
 
@@ -52,54 +64,30 @@ always be evident in diffs as presented on GH).
 
 We might simply reject scattershot or overly large PRs.
 
+Coding agents should follow [`AGENTS.md`](AGENTS.md). Thin adapters exist for
+Copilot, Claude Code, and Gemini CLI; do not duplicate those rules elsewhere.
+Humans still follow this file, [`CODING.md`](CODING.md), [`HACKING.md`](HACKING.md),
+and the topic files under [`docs/contributing/`](docs/contributing/),
+[`docs/coding/`](docs/coding/), and [`docs/hacking/`](docs/hacking/).
+
 ## Pull requests and tests
 
-Before merging any changes into the snapd codebase, we need to verify that the
-proposed functionality and code quality does not degrade the functionality and
-quality requirement we've set for the project.
+CI runs static checks, unit tests, and spread integration tests on every PR.
+Tests are not required to open a PR, but we rarely merge without them (we may
+write them on your behalf). Reviewers will say if tests are still needed.
 
-For each PR, we run checks in three different groups: static, unit and spread.
-
-Static tests use several code analysis tools present in the golang ecosystem
-(go vet, go lint and go fmt) to make sure that the code always aligns with
-the standards. They also check the markdown format of documentation files.
-
-All the existing unit tests are also executed, and the coverage info is
-reported to coveralls.
-
-We use [spread](https://github.com/canonical/spread-plus) to verify the
-integrity of the product, exercising it as a whole, both from an end user
-standpoint (eg. all kinds of interactions with the snap tool from the command
-line) and from a more systemic approach (testing upgrades, for instance).
-
-Spread and unit tests are not strictly a requirement for a PR to be submitted,
-but we do strongly encourage contributors to include them. We rarely merge code
-without tests although we may occasionally write them ourselves on behalf of
-a contributor.
-
-Unit tests help us understand expected behaviour, verified through the tests
-and review process, which ensures we're building on the solid base of a tested
-and working system.
-
-If any tests need to be added for a PR to be merged it will be denoted
-during the review process.
-
-See [Testing](HACKING.md#user-content-testing) for further details on running
-tests.
+How to run tests: [docs/hacking/unit-tests.md](docs/hacking/unit-tests.md).
 
 ## Pull request guidelines
 
-Contributions are submitted through a [pull request][pull-request] created from
-a [fork][fork] of the `snapd` repository (under your GitHub account).
+Open a PR from a [fork][fork]. Keep history linear. After the first review, add
+commits instead of rewriting; two approvals are required to merge.
 
-GitHub's documentation outlines the [process][github-pr], but for a more
-concise and informative version try [this GitHub gist][pr-gist]. 
+How to open and update a PR:
+[docs/contributing/pull-requests.md](docs/contributing/pull-requests.md).
 
-### Linear git history
-
-We strive to keep a [linear git history][linear-git]. This makes it easier to
-inspect the history, keep related commits next to each other, and make tools
-like [git bisect][git-bisect] work intuitively.
+How to slice the diff, title it, and merge:
+[docs/contributing/prs.md](docs/contributing/prs.md).
 
 ### Labels
 
@@ -119,7 +107,7 @@ The following labels are commonly used:
   features (though this should almost never happen).
   * Our user-facing documentation can be found here: https://snapcraft.io/docs
   * The PR description must explain any required documentation changes.
-  * For internal documentation in this repository, it's expected that 
+  * For internal documentation in this repository, it's expected that
     documentation changes are delivered in the same branch.
     Please don't abuse this tag.
 - `Needs Samuele review`: Samuele (@pedronis) is our architect, and this label
@@ -151,60 +139,8 @@ The following labels are commonly used:
   - Run all non-core ubuntu systems: `#runonlyonesystem ^ubuntu(?!-core).*`
   - Run only jammy: `#runonlyonesystem ubuntu-22.04-64`
 
-### Pull request updates
-
-Feel free to [rebase][github-rebase], rework commits, and [force
-push][git-force] to your branch while a PR is waiting for its first review.
-
-However, if you are still making significant changes during this waiting
-phase, it's a good idea to keep the PR as a [draft][github-draft]. This stops
-reviewers from looking at code you may not be confident about. Set the PR as
-"Ready for review" when you do feel confident.
-
-During the review process, reviewers will point out defects or suggest
-alternative implementations.
-
-After the first review, please treat your already pushed commits as immutable
-and submit any requested changes as additional commits. This helps reviewers to
-see exactly what has changed since the last review without requesting them to
-review all the changes.
-
-Two approvals are required for a PR to be merged. A PR can then be merged into the main branch.
-
-After approval, you can rework the branch history as you see fit. Consider
-squashing commits from the original PR with those made during the review
-process, for example. Commit messages should follow the format described in
-[CODING.md](CODING.md). A [force push][git-force] will be required if you
-rework the history.
-
-Start a [rebase][github-rebase] from the original parent commit of your first
-commit. Ensure you do not rebase on top of the current main as this means
-changes from the _main_ branch will be shown in the GitHub UI as part of your
-changes, making the verification more confusing.
-
-Merge using Github's [Squash and Merge][github-squash-merge] or [Rebase and merge][github-rebase-merge],
-never [Create a merge commit][github-merge-commit].
-* [Squash and Merge][github-squash-merge] is preferred because it simplifies cherry-picking of PR
-content.
-  * Also for single commits
-  * This merge will use the title as commit message so double check that it is accurate and concise
-* [Rebase and merge][github-rebase-merge] is required when it is important to be able to distinguish
-different parts of a solution in the future.
-  * Keep commits to a minimum
-  * Squash uninteresting commits such as review improvements after review approval
-
 [1]: http://www.ubuntu.com/legal/contributors
-[pull-request]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork
 [fork]: https://docs.github.com/en/get-started/quickstart/fork-a-repo#forking-a-repository
-[github-pr]: https://docs.github.com/en/github/collaborating-with-pull-requests
-[pr-gist]: https://gist.github.com/Chaser324/ce0505fbed06b947d962
-[linear-git]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/about-protected-branches#require-linear-history
-[git-bisect]: https://git-scm.com/docs/git-bisect
-[github-draft]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests 
+[github-draft]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests
 [github-labels]: https://docs.github.com/en/issues/using-labels-and-milestones-to-track-work/managing-labels
 [nested-tests]: https://github.com/snapcore/snapd/tree/master/tests/nested
-[github-rebase]: https://docs.github.com/en/get-started/using-git/about-git-rebase
-[git-force]: https://git-scm.com/docs/git-push#Documentation/git-push.txt---force
-[github-rebase-merge]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/about-pull-request-merges#rebase-and-merge-your-commits
-[github-squash-merge]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/about-pull-request-merges#squash-and-merge-your-commits
-[github-merge-commit]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/about-pull-request-merges#merge-your-commits
