@@ -1,0 +1,149 @@
+name: sync private snapd
+
+# Shared with canonical/snapd so private master can stay a fast-forward of
+# public master. The job is a no-op everywhere except the security repo.
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      release-branch-count:
+        description: 'Number of newest public release/<version> branches to sync'
+        type: number
+        default: 3
+
+# GITHUB_TOKEN can push only if the private repo ruleset allows github-actions[bot]
+# to bypass "changes must be made through a pull request" on master / release/*.
+permissions:
+  contents: write
+
+# serialize runs without cancelling an in-progress sync
+concurrency:
+  group: sync-private-snapd
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'canonical/snapd-security-release'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_BRANCH_COUNT: ${{ inputs.release-branch-count || 3 }}
+      PUBLIC_URL: https://github.com/canonical/snapd.git
+    steps:
+      - name: Checkout security repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Fast-forward from canonical/snapd
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${RELEASE_BRANCH_COUNT}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::release-branch-count must be a positive integer, got: ${RELEASE_BRANCH_COUNT}"
+              exit 1
+          fi
+
+          git remote add public "${PUBLIC_URL}"
+          # + only updates local tracking refs, not origin
+          git fetch public \
+              '+refs/heads/master:refs/remotes/public/master' \
+              '+refs/heads/release/*:refs/remotes/public/release/*' \
+              '+refs/tags/*:refs/public-tags/*'
+
+          mapfile -t release_branches < <(
+              git for-each-ref --format='%(refname)' refs/remotes/public/release |
+                  sed -n 's|^refs/remotes/public/||p' |
+                  { grep -E '^release/[0-9]+\.[0-9]+(\.[0-9]+)?$' || true; } |
+                  sort -V |
+                  tail -n "${RELEASE_BRANCH_COUNT}"
+          )
+
+          refspecs=(refs/remotes/public/master:refs/heads/master)
+          for dest_name in "${release_branches[@]}"; do
+              [[ -n "${dest_name}" ]] || continue
+              refspecs+=("refs/remotes/public/${dest_name}:refs/heads/${dest_name}")
+          done
+          refspecs+=('refs/public-tags/*:refs/tags/*')
+
+          set +e
+          git push --ff-only --porcelain origin "${refspecs[@]}" >push.out 2>push.err
+          status=$?
+          set -e
+          cat push.err >&2
+          cat push.out
+
+          {
+              echo "# Security repo sync"
+              echo
+              echo "Source: \`${PUBLIC_URL}\`"
+              echo
+              echo "| Ref | Result |"
+              echo "| --- | --- |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          pretty_ref() {
+              case "$1" in
+                  refs/heads/*) echo "${1#refs/heads/}" ;;
+                  refs/tags/*) echo "tags/${1#refs/tags/}" ;;
+                  *) echo "$1" ;;
+              esac
+          }
+
+          conflicts=0
+          tags_uptodate=0
+          while IFS=$'\t' read -r flag fromto summary reason; do
+              [[ -n "${flag}" ]] || continue
+              dest="${fromto#*:}"
+              ref="$(pretty_ref "${dest}")"
+              case "${flag}" in
+                  '*')
+                      echo "created ${ref}"
+                      echo "| \`${ref}\` | created |" >> "${GITHUB_STEP_SUMMARY}"
+                      ;;
+                  ' ')
+                      echo "fast-forwarded ${ref}"
+                      echo "| \`${ref}\` | fast-forwarded |" >> "${GITHUB_STEP_SUMMARY}"
+                      ;;
+                  '=')
+                      if [[ "${dest}" == refs/tags/* ]]; then
+                          tags_uptodate=$((tags_uptodate + 1))
+                      else
+                          echo "${ref} already up to date"
+                          echo "| \`${ref}\` | already up to date |" >> "${GITHUB_STEP_SUMMARY}"
+                      fi
+                      ;;
+                  '!')
+                      detail="${reason:-${summary}}"
+                      echo "::error::SYNC CONFLICT: cannot fast-forward ${ref}: ${detail}"
+                      echo "****************************************" >&2
+                      echo "SYNC CONFLICT: cannot fast-forward ${ref}" >&2
+                      echo "${detail}" >&2
+                      echo "****************************************" >&2
+                      echo "| \`${ref}\` | **CONFLICT** — ${detail} |" >> "${GITHUB_STEP_SUMMARY}"
+                      conflicts=$((conflicts + 1))
+                      ;;
+              esac
+          done < push.out
+
+          if [[ "${tags_uptodate}" -gt 0 ]]; then
+              echo "${tags_uptodate} public tag(s) already up to date"
+              echo "| \`tags/*\` | ${tags_uptodate} already up to date |" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          if [[ "${conflicts}" -eq 0 && "${status}" -ne 0 ]]; then
+              echo "::error::SYNC CONFLICT: git push failed. Manual intervention required. No refs were force-pushed."
+              echo "| \`push\` | **CONFLICT** — git push exited ${status} |" >> "${GITHUB_STEP_SUMMARY}"
+              conflicts=1
+          fi
+
+          if [[ "${conflicts}" -ne 0 ]]; then
+              echo "::error::SYNC CONFLICT: ${conflicts} ref(s) could not be fast-forwarded. Manual intervention required. No refs were force-pushed."
+              echo >> "${GITHUB_STEP_SUMMARY}"
+              echo "**${conflicts} conflict(s) — manual intervention required. No refs were force-pushed.**" >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+          fi
+
+          echo >> "${GITHUB_STEP_SUMMARY}"
+          echo "All selected refs are fast-forwards or were created." >> "${GITHUB_STEP_SUMMARY}"
