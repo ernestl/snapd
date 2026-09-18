@@ -1,0 +1,89 @@
+name: test maintenance
+
+# Cherry-pick tests-only commits from master onto the newest N release/*
+# branches. Direct-push uses a GitHub App installation token, with a PAT
+# fallback, so the actor can bypass the require-PR ruleset on release/*.
+#
+# GitHub App (preferred):
+#   vars.SNAPD_TEST_MAINTENANCE_APP_ID
+#   secrets.SNAPD_TEST_MAINTENANCE_APP_KEY
+# PAT fallback:
+#   secrets.SNAPD_TEST_MAINTENANCE_PAT
+#
+# The App (or PAT user) must be on the canonical/snapd ruleset bypass list for
+# release/*. App permissions: contents read/write, pull requests read.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      release-branch-count:
+        description: 'Number of newest release/ branches to update'
+        type: string
+        default: '3'
+      dry-run:
+        description: 'List and resolve PRs only; do not cherry-pick or push'
+        type: boolean
+        default: false
+
+# git push uses the App token or PAT, not GITHUB_TOKEN.
+permissions: {}
+
+# Serialize runs without cancelling an in-progress backport. A second
+# scheduled or manual run waits; GitHub concurrency cannot skip.
+concurrency:
+  group: test-maintenance
+  cancel-in-progress: false
+
+jobs:
+  backport:
+    if: github.repository == 'canonical/snapd'
+    runs-on: ubuntu-latest
+    env:
+      # workflow_dispatch input is a string so 0 is not swallowed as falsy.
+      RELEASE_BRANCH_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.release-branch-count || '3' }}
+      GIT_COMMITTER_NAME: snapd-test-maintenance[bot]
+      GIT_COMMITTER_EMAIL: snapd-test-maintenance[bot]@users.noreply.github.com
+    steps:
+      - name: Mint GitHub App token
+        if: vars.SNAPD_TEST_MAINTENANCE_APP_ID != ''
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SNAPD_TEST_MAINTENANCE_APP_ID }}
+          private-key: ${{ secrets.SNAPD_TEST_MAINTENANCE_APP_KEY }}
+
+      - name: Require GitHub App token or PAT
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          PAT_TOKEN: ${{ secrets.SNAPD_TEST_MAINTENANCE_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APP_TOKEN:-}" && -z "${PAT_TOKEN:-}" ]]; then
+            echo "::error::need GitHub App (SNAPD_TEST_MAINTENANCE_APP_ID/APP_KEY) or PAT (SNAPD_TEST_MAINTENANCE_PAT)"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ steps.app-token.outputs.token || secrets.SNAPD_TEST_MAINTENANCE_PAT }}
+
+      - name: Backport tests-only commits
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.SNAPD_TEST_MAINTENANCE_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.SNAPD_TEST_MAINTENANCE_PAT }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            extra+=(--dry-run)
+          fi
+          PYTHONPATH="${GITHUB_WORKSPACE}/.github/scripts" python3 -m test_maintenance backport \
+            --repo "${GITHUB_REPOSITORY}" \
+            --release-branch-count "${RELEASE_BRANCH_COUNT}" \
+            "${extra[@]}"

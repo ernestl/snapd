@@ -697,11 +697,12 @@ if [ "$UNIT" = 1 ]; then
     if [ -n "$SKIP_PYTHON_UNIT_TESTS" ]; then
         echo ">> [Python] Skipping python3 unit tests"
     elif command -v python3; then
-        echo ">> [Python] Running python3 unit tests for mountinfo.query and version-compare"
+        echo ">> [Python] Running python3 unit tests for mountinfo.query, version-compare, and test-maintenance"
         python3 ./tests/lib/tools/mountinfo.query --run-unit-tests
         python3 ./tests/lib/tools/version-compare --run-unit-tests
+        PYTHONPATH=.github/scripts python3 -m unittest discover -s .github/scripts/test_maintenance/tests -t .github/scripts
     else
-        echo ">> [Python] Skipping python3 unit tests for mountinfo.query and version-compare"
+        echo ">> [Python] Skipping python3 unit tests for mountinfo.query, version-compare, and test-maintenance"
     fi
     if [ -n "$SKIP_PYTHON_UNIT_TESTS" ]; then
         echo ">> [Python] Skipping pytest-3 test for release-tools"

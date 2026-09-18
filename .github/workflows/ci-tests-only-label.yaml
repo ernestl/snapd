@@ -1,0 +1,33 @@
+name: tests-only label
+
+# Classify pull requests with the same tests-only path allowlist used by
+# the daily backport job. Does not add Skip spread.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    if: github.repository == 'canonical/snapd'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout classifier
+        uses: actions/checkout@v6
+        with:
+          # pull_request_target checks out the base so the classifier is trusted.
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Apply tests-only label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="${GITHUB_WORKSPACE}/.github/scripts" python3 -m test_maintenance label-pr \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --no-fail
