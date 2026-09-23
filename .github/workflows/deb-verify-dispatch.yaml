@@ -1,0 +1,81 @@
+name: Deb verify dispatch
+
+# Start deb verification for a pull request into a release branch, then
+# record the privileged run on that commit.
+#
+# pull_request from a fork cannot read the Launchpad secrets, so this
+# workflow runs on the base branch and dispatches deb-verify.yaml from
+# master. It does not check out the pull request.
+#
+# The deb-verify commit status is the pull request check. Require that
+# status, not this dispatcher, if branch protection should wait for the
+# builds and autopkgtests.
+#
+# This file has to be on the pull request's base branch. Landing it on
+# master covers release branches cut afterwards. Cherry-pick it onto
+# active release/* branches so current release pull requests start it.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+  actions: write
+  statuses: write
+
+concurrency:
+  group: deb-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch deb verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          key="pr-${PR}-${SHA}"
+          since=$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run deb-verify.yaml --ref master \
+            -f pr_number="$PR" \
+            -f head_repo="$REPO" \
+            -f head_sha="$SHA" \
+            -f run_key="$key"
+
+          url=""
+          for _ in $(seq 1 30); do
+            url=$(gh run list --workflow=deb-verify.yaml --limit 30 \
+              --json displayTitle,url,createdAt \
+              | jq -r --arg key "$key" --arg since "$since" \
+                '[.[] | select(.displayTitle | contains($key)) | select(.createdAt >= $since)] | last | .url // empty')
+            if [ -n "$url" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$url" ]; then
+            echo "deb-verify run for ${key} did not appear" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Deb verification"
+            echo
+            echo "Tracking run: ${url}"
+            echo
+            echo "Key: \`${key}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state=pending \
+            -f context=deb-verify \
+            -f target_url="$url" \
+            -f description="Deb verification running"

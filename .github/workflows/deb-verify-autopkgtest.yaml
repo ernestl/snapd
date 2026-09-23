@@ -1,0 +1,105 @@
+name: Deb verify autopkgtest
+
+# Trigger and wait for snapd autopkgtests of packages already built in a PPA.
+# Pass the publications JSON produced by deb-verify-build.yaml.
+#
+# Secrets (repository settings; this workflow does not create them):
+#   SNAPD_AUTOPKGTEST_API_KEY — "username:api-key" sent as the X-Api-Key cookie.
+#     The user must be allowed to request autopkgtests.
+
+on:
+  workflow_call:
+    inputs:
+      publications:
+        description: Publications JSON from the build workflow
+        required: true
+        type: string
+      ppa:
+        description: Launchpad PPA as owner/name
+        required: false
+        type: string
+        default: snappy-dev/beta
+    outputs:
+      ok:
+        description: true when every requested autopkgtest passed
+        value: ${{ jobs.test.outputs.ok }}
+  workflow_dispatch:
+    inputs:
+      publications:
+        description: Publications JSON from the build workflow
+        required: true
+        type: string
+      ppa:
+        description: Launchpad PPA as owner/name
+        required: false
+        type: string
+        default: snappy-dev/beta
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      ok: ${{ steps.emit.outputs.ok }}
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Request and wait for autopkgtests
+        id: run
+        continue-on-error: true
+        env:
+          PUBLICATIONS: ${{ inputs.publications }}
+          DEB_VERIFY_PPA: ${{ inputs.ppa }}
+          SNAPD_AUTOPKGTEST_API_KEY: ${{ secrets.SNAPD_AUTOPKGTEST_API_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$PUBLICATIONS" > publications.json
+          python3 - << 'PY'
+          import json, os, sys
+          doc = json.load(open("publications.json"))
+          owner, _, name = os.environ["DEB_VERIFY_PPA"].partition("/")
+          if not owner or not name or doc.get("owner") != owner or doc.get("ppa") != name:
+              sys.exit(
+                  "publications PPA %s/%s does not match %s"
+                  % (doc.get("owner"), doc.get("ppa"), os.environ["DEB_VERIFY_PPA"])
+              )
+          PY
+          python3 release-tools/deb_verify.py run-autopkgtests \
+            --publications publications.json \
+            --write autopkgtest-report.json \
+            --timeout 21000 \
+            --interval 60
+
+      - name: Summarize autopkgtests
+        if: always() && !cancelled()
+        run: |
+          python3 release-tools/deb_verify.py summarize \
+            --autopkgtest-only \
+            --autopkgtest-report autopkgtest-report.json \
+            --write-summary "$GITHUB_STEP_SUMMARY" \
+            --write-result result.json || true
+
+      - name: Publish outputs
+        id: emit
+        if: always() && !cancelled()
+        run: |
+          python3 -c 'import json,sys; result=json.load(open("result.json")); print("ok=true" if result.get("ok") else "ok=false")' >> "$GITHUB_OUTPUT"
+
+      - name: Upload autopkgtest report
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-autopkgtest-report
+          path: autopkgtest-report.json
+          if-no-files-found: warn
+
+      - name: Fail when autopkgtests failed
+        if: steps.run.outcome == 'failure' || steps.emit.outputs.ok != 'true'
+        run: exit 1

@@ -1,0 +1,391 @@
+name: Deb verify build
+
+# Build snapd source packages from a release pull request, upload them to
+# ppa:snappy-dev/beta, and wait until Launchpad has finished every build.
+#
+# Secrets (repository settings; this workflow does not create them):
+#   SNAPD_LP_USERNAME — Launchpad user that can upload to ~snappy-dev/ubuntu/beta
+#   SNAPD_LP_SSH_KEY — private key registered on that user (PEM or base64)
+#   SNAPD_LP_GPG_PRIVATE_KEY — signing key imported into Launchpad (PEM or base64)
+#   SNAPD_LP_GPG_KEY_ID — key id passed to debsign
+#   SNAPD_LP_API_CREDENTIALS_BASE64 — optional. Build records are read from
+#     the public Launchpad API, which is enough for ppa:snappy-dev/beta.
+#
+# The source-package job does not receive those secrets. Upload is a later job.
+
+on:
+  workflow_call:
+    inputs:
+      head_repo:
+        description: Repository that contains the pull request head (owner/name)
+        required: true
+        type: string
+      head_sha:
+        description: Commit to package
+        required: true
+        type: string
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      run_id:
+        description: Actions run id embedded in the package version. Defaults to this run.
+        required: false
+        type: string
+        default: ""
+      ppa:
+        description: Launchpad PPA as owner/name
+        required: false
+        type: string
+        default: snappy-dev/beta
+    outputs:
+      publications:
+        description: JSON of series that built successfully
+        value: ${{ jobs.finalize.outputs.publications }}
+      skipped:
+        description: true when the pull request head moved before upload
+        value: ${{ jobs.finalize.outputs.skipped }}
+  workflow_dispatch:
+    inputs:
+      head_repo:
+        description: Repository that contains the pull request head (owner/name)
+        required: true
+        type: string
+      head_sha:
+        description: Commit to package
+        required: true
+        type: string
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      run_id:
+        description: Actions run id embedded in the package version. Defaults to this run.
+        required: false
+        type: string
+        default: ""
+      ppa:
+        description: Launchpad PPA as owner/name
+        required: false
+        type: string
+        default: snappy-dev/beta
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      superseded: ${{ steps.plan.outputs.superseded }}
+      planned: ${{ steps.plan.outputs.planned }}
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          path: workflow
+          persist-credentials: false
+
+      - name: Checkout pull request
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.head_repo }}
+          ref: ${{ inputs.head_sha }}
+          path: src
+          persist-credentials: false
+
+      - name: Install source-package tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates distro-info dpkg-dev devscripts git git-buildpackage python3
+
+      - name: Plan series and versions
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEB_VERIFY_TOOL: workflow/release-tools/deb_verify.py
+          DEB_VERIFY_TREE: src
+          DEB_VERIFY_OUT: deb-verify-out
+          DEB_VERIFY_PR: ${{ inputs.pr_number }}
+          DEB_VERIFY_SHA: ${{ inputs.head_sha }}
+          DEB_VERIFY_RUN_ID: ${{ inputs.run_id || github.run_id }}
+          DEB_VERIFY_HEAD_REPO: ${{ inputs.head_repo }}
+          DEB_VERIFY_REPO: ${{ github.repository }}
+          DEB_VERIFY_PPA: ${{ inputs.ppa }}
+        run: bash workflow/release-tools/deb-verify-plan.sh
+
+      - name: Set up Go
+        if: steps.plan.outputs.superseded != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Build source packages
+        id: build
+        if: steps.plan.outputs.superseded != 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          DEB_VERIFY_TOOL: workflow/release-tools/deb_verify.py
+          DEB_VERIFY_TREE: src
+          DEB_VERIFY_OUT: deb-verify-out
+        run: bash workflow/release-tools/deb-verify-sources.sh
+
+      - name: Upload versions
+        if: always() && !cancelled() && steps.plan.outputs.planned == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-versions
+          path: deb-verify-out/versions.json
+
+      - name: Upload source status
+        if: always() && !cancelled() && steps.plan.outputs.superseded != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-sources-status
+          path: deb-verify-out/sources.json
+          if-no-files-found: warn
+
+      - name: Upload source packages
+        if: always() && !cancelled() && steps.plan.outputs.superseded != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-source-packages
+          path: deb-verify-out/pkg
+          if-no-files-found: warn
+
+      - name: Upload skipped report
+        if: steps.plan.outputs.superseded == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-skipped
+          path: |
+            deb-verify-out/build-report.json
+            deb-verify-out/publications.json
+
+      - name: Propagate source failure
+        if: steps.plan.outcome == 'failure' || steps.build.outcome == 'failure'
+        run: exit 1
+
+  upload:
+    needs: source
+    if: always() && !cancelled() && needs.source.outputs.superseded != 'true' && needs.source.outputs.planned == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      superseded: ${{ steps.upload.outputs.superseded }}
+      any_ok: ${{ steps.upload.outputs.any_ok }}
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          path: workflow
+          persist-credentials: false
+
+      - name: Download versions
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-verify-versions
+          path: deb-verify-out
+
+      - name: Download source packages
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-source-packages
+          path: deb-verify-out/pkg
+
+      - name: Install upload tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends devscripts dput gnupg openssh-client python3
+
+      - name: Sign and upload
+        id: upload
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEB_VERIFY_TOOL: workflow/release-tools/deb_verify.py
+          DEB_VERIFY_OUT: deb-verify-out
+          DEB_VERIFY_PR: ${{ inputs.pr_number }}
+          DEB_VERIFY_SHA: ${{ inputs.head_sha }}
+          DEB_VERIFY_REPO: ${{ github.repository }}
+          DEB_VERIFY_PPA: ${{ inputs.ppa }}
+          SNAPD_LP_USERNAME: ${{ secrets.SNAPD_LP_USERNAME }}
+          SNAPD_LP_SSH_KEY: ${{ secrets.SNAPD_LP_SSH_KEY }}
+          SNAPD_LP_GPG_PRIVATE_KEY: ${{ secrets.SNAPD_LP_GPG_PRIVATE_KEY }}
+          SNAPD_LP_GPG_KEY_ID: ${{ secrets.SNAPD_LP_GPG_KEY_ID }}
+        run: bash workflow/release-tools/deb-verify-upload.sh
+
+      - name: Upload upload status
+        if: always() && !cancelled() && steps.upload.outputs.superseded != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-uploads-status
+          path: deb-verify-out/uploads.json
+          if-no-files-found: warn
+
+      - name: Upload skipped report
+        if: steps.upload.outputs.superseded == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-skipped
+          path: |
+            deb-verify-out/build-report.json
+            deb-verify-out/publications.json
+
+      - name: Propagate upload failure
+        if: steps.upload.outcome == 'failure' && steps.upload.outputs.superseded != 'true'
+        run: exit 1
+
+  wait:
+    needs: upload
+    if: always() && !cancelled() && needs.upload.outputs.superseded != 'true' && needs.upload.outputs.any_ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          path: workflow
+          persist-credentials: false
+
+      - name: Download versions
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-verify-versions
+          path: deb-verify-out
+
+      - name: Download upload status
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-verify-uploads-status
+          path: deb-verify-out
+
+      - name: Wait for Launchpad builds
+        id: wait
+        continue-on-error: true
+        env:
+          DEB_VERIFY_PPA: ${{ inputs.ppa }}
+        run: |
+          python3 workflow/release-tools/deb_verify.py wait-builds \
+            --ppa "$DEB_VERIFY_PPA" \
+            --versions deb-verify-out/versions.json \
+            --uploads deb-verify-out/uploads.json \
+            --write deb-verify-out/builds.json \
+            --timeout 21000 \
+            --interval 60
+
+      - name: Upload build status
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-builds-status
+          path: deb-verify-out/builds.json
+          if-no-files-found: warn
+
+      - name: Propagate build failure
+        if: steps.wait.outcome == 'failure'
+        run: exit 1
+
+  finalize:
+    needs: [source, upload, wait]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    outputs:
+      publications: ${{ steps.emit.outputs.publications }}
+      skipped: ${{ steps.emit.outputs.skipped }}
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download skipped report
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-skipped
+          path: in/skipped
+
+      - name: Download versions
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-versions
+          path: in/versions
+
+      - name: Download source status
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-sources-status
+          path: in/sources
+
+      - name: Download upload status
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-uploads-status
+          path: in/uploads
+
+      - name: Download build status
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-builds-status
+          path: in/builds
+
+      - name: Assemble build report
+        env:
+          DEB_VERIFY_PPA: ${{ inputs.ppa }}
+        run: |
+          set -euo pipefail
+          if [ -f in/skipped/build-report.json ]; then
+            cp in/skipped/build-report.json build-report.json
+            cp in/skipped/publications.json publications.json
+          else
+            args=(assemble --ppa "$DEB_VERIFY_PPA" --write build-report.json --publications publications.json)
+            if [ -f in/versions/versions.json ]; then
+              args+=(--versions in/versions/versions.json)
+            fi
+            if [ -f in/sources/sources.json ]; then
+              args+=(--sources in/sources/sources.json)
+            fi
+            if [ -f in/uploads/uploads.json ]; then
+              args+=(--uploads in/uploads/uploads.json)
+            fi
+            if [ -f in/builds/builds.json ]; then
+              args+=(--builds in/builds/builds.json)
+            fi
+            python3 release-tools/deb_verify.py "${args[@]}" || true
+          fi
+          python3 release-tools/deb_verify.py summarize \
+            --build-only \
+            --build-report build-report.json \
+            --write-summary "$GITHUB_STEP_SUMMARY" \
+            --write-result result.json || true
+
+      - name: Publish outputs
+        id: emit
+        run: |
+          set -euo pipefail
+          python3 -c 'import json; print("publications=" + json.dumps(json.load(open("publications.json")), separators=(",", ":")))' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; report=json.load(open("build-report.json")); print("skipped=true" if report.get("skipped") else "skipped=false")' >> "$GITHUB_OUTPUT"
+
+      - name: Upload build report
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-verify-build-report
+          path: |
+            build-report.json
+            publications.json
+
+      - name: Fail when the build stage failed
+        run: python3 -c 'import json,sys; sys.exit(0 if json.load(open("result.json"))["ok"] else 1)'
