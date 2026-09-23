@@ -1,0 +1,118 @@
+name: Deb verify
+run-name: deb-verify ${{ inputs.run_key }}
+
+# Run the build workflow, then autopkgtests, and post one summary on the
+# pull request commit.
+#
+# Secrets are inherited by the called workflows. Add them in repository
+# settings; this workflow does not create them.
+#   SNAPD_LP_USERNAME
+#   SNAPD_LP_SSH_KEY
+#   SNAPD_LP_GPG_PRIVATE_KEY
+#   SNAPD_LP_GPG_KEY_ID
+#   SNAPD_LP_API_CREDENTIALS_BASE64 (optional; public PPA reads do not need it)
+#   SNAPD_AUTOPKGTEST_API_KEY
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      head_repo:
+        description: Repository that contains the pull request head (owner/name)
+        required: true
+        type: string
+      head_sha:
+        description: Commit to package
+        required: true
+        type: string
+      run_key:
+        description: Correlation key, usually pr-<number>-<sha>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+  statuses: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/deb-verify-build.yaml
+    secrets: inherit
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      head_repo: ${{ inputs.head_repo }}
+      head_sha: ${{ inputs.head_sha }}
+      run_id: ${{ github.run_id }}
+      ppa: snappy-dev/beta
+
+  autopkgtest:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.skipped != 'true'
+    uses: ./.github/workflows/deb-verify-autopkgtest.yaml
+    secrets: inherit
+    with:
+      publications: ${{ needs.build.outputs.publications }}
+      ppa: snappy-dev/beta
+
+  summary:
+    needs: [build, autopkgtest]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download build report
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-build-report
+          path: reports/build
+
+      - name: Download autopkgtest report
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: deb-verify-autopkgtest-report
+          path: reports/adt
+
+      - name: Write summary and commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          set +e
+          python3 release-tools/deb_verify.py summarize \
+            --build-report reports/build/build-report.json \
+            --autopkgtest-report reports/adt/autopkgtest-report.json \
+            --write-summary "$GITHUB_STEP_SUMMARY" \
+            --write-result result.json
+          status=$?
+          set -e
+          if [ ! -f result.json ]; then
+            echo '{"ok": false, "skipped": false}' > result.json
+          fi
+          read -r ok skipped < <(python3 -c 'import json; r=json.load(open("result.json")); print("true" if r.get("ok") else "false", "true" if r.get("skipped") else "false")')
+          if [ "$skipped" = "true" ]; then
+            state=success
+            desc="Deb verification superseded by a newer commit"
+          elif [ "$ok" = "true" ]; then
+            state=success
+            desc="Deb verification passed"
+          else
+            state=failure
+            desc="Deb verification failed"
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="$state" \
+            -f context="deb-verify" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            -f description="$desc"
+          exit "$status"

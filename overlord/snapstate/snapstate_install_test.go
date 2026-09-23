@@ -911,6 +911,53 @@ func (s *snapmgrTestSuite) TestInstallConflict(c *C) {
 	c.Assert(err, ErrorMatches, `snap "some-snap" has "install" change in progress`)
 }
 
+func (s *snapmgrTestSuite) TestInstallSnapUsingBasePreventsBaseRemoval(c *C) {
+	s.state.Lock()
+	defer s.state.Unlock()
+
+	si := &snap.SideInfo{RealName: "some-base", SnapID: "some-base-id", Revision: snap.R(1)}
+	snaptest.MockSnapCurrent(c, "name: some-base\nversion: 1.0\ntype: base\n", si)
+	snapstate.Set(s.state, "some-base", &snapstate.SnapState{
+		Active:   true,
+		Sequence: snapstatetest.NewSequenceFromSnapSideInfos([]*snap.SideInfo{si}),
+		Current:  si.Revision,
+		SnapType: string(snap.TypeBase),
+	})
+
+	ts, err := snapstate.Install(context.Background(), s.state, "some-snap", &snapstate.RevisionOptions{Channel: "channel-for-base/stable"}, 0, snapstate.Flags{})
+	c.Assert(err, IsNil)
+	installChg := s.state.NewChange("install-snap", "...")
+	installChg.AddAll(ts)
+
+	_, err = snapstate.Remove(s.state, "some-base", snap.R(0), nil)
+	c.Assert(err, ErrorMatches, `snap "some-base" is not removable: snap is being used by snap some-snap\.`)
+}
+
+func (s *snapmgrTestSuite) TestPreDownloadSnapUsingBaseDoesNotPreventBaseRemoval(c *C) {
+	s.state.Lock()
+	defer s.state.Unlock()
+
+	si := &snap.SideInfo{RealName: "some-base", SnapID: "some-base-id", Revision: snap.R(1)}
+	snaptest.MockSnapCurrent(c, "name: some-base\nversion: 1.0\ntype: base\n", si)
+	snapstate.Set(s.state, "some-base", &snapstate.SnapState{
+		Active:   true,
+		Sequence: snapstatetest.NewSequenceFromSnapSideInfos([]*snap.SideInfo{si}),
+		Current:  si.Revision,
+		SnapType: string(snap.TypeBase),
+	})
+
+	task := s.state.NewTask("download-snap", "...")
+	task.Set("snap-setup", &snapstate.SnapSetup{
+		Base:     "some-base",
+		SideInfo: &snap.SideInfo{RealName: "some-snap", Revision: snap.R(1)},
+	})
+	preDlChg := s.state.NewChange("pre-download", "...")
+	preDlChg.AddTask(task)
+
+	_, err := snapstate.Remove(s.state, "some-base", snap.R(0), nil)
+	c.Assert(err, IsNil)
+}
+
 func (s *snapmgrTestSuite) TestGadgetInstallConflictExclusiveKind(c *C) {
 	restore := release.MockOnClassic(false)
 	defer restore()
@@ -7218,7 +7265,7 @@ func (s *snapmgrTestSuite) testInstallComponentsRunThrough(c *C, opts testInstal
 	snapRevision := snap.R(11)
 	const channel = "channel-for-components"
 
-	instanceName := snap.InstanceName(opts.snapName, opts.instanceKey)
+	instanceName := snap.InstanceName(opts.snapName, opts.instanceKey).String()
 
 	// we start without the auxiliary store info
 	c.Check(backend.AuxStoreInfoFilename(snapID), testutil.FileAbsent)
@@ -7232,7 +7279,7 @@ func (s *snapmgrTestSuite) testInstallComponentsRunThrough(c *C, opts testInstal
 	}
 
 	s.fakeStore.snapResourcesFn = func(info *snap.Info) []store.SnapResourceResult {
-		c.Assert(info.InstanceName(), DeepEquals, instanceName)
+		c.Assert(info.InstanceName().String(), DeepEquals, instanceName)
 		var results []store.SnapResourceResult
 		for _, cs := range componentStates {
 			results = append(results, store.SnapResourceResult{
@@ -7260,7 +7307,7 @@ func (s *snapmgrTestSuite) testInstallComponentsRunThrough(c *C, opts testInstal
 	})
 	c.Assert(err, IsNil)
 
-	c.Check(info.InstanceName(), Equals, instanceName)
+	c.Check(info.InstanceName().String(), Equals, instanceName)
 	c.Check(info.Channel, Equals, channel)
 	c.Check(info.Revision, Equals, snapRevision)
 
@@ -7663,7 +7710,7 @@ func (s *snapmgrTestSuite) testSeedingGoalWithComponentsRunThrough(c *C, opts te
 		snapRevision = snap.R(-1)
 	}
 
-	instanceName := snap.InstanceName(opts.snapName, opts.instanceKey)
+	instanceName := snap.InstanceName(opts.snapName, opts.instanceKey).String()
 
 	components := make([]snapstate.PathComponent, 0, len(opts.components))
 	compPaths := make(map[string]string, len(opts.components))
@@ -7765,7 +7812,7 @@ components:
 		},
 	})
 	c.Assert(err, IsNil)
-	c.Check(info.InstanceName(), Equals, instanceName)
+	c.Check(info.InstanceName().String(), Equals, instanceName)
 	c.Check(info.Revision, Equals, si.Revision)
 
 	chg.AddAll(ts)
@@ -8212,7 +8259,7 @@ func (s *validationSetsSuite) testInstallComponentsValidationSets(c *C, opts tes
 	defer restore()
 
 	s.fakeStore.snapResourcesFn = func(info *snap.Info) []store.SnapResourceResult {
-		c.Assert(info.InstanceName(), DeepEquals, snapName)
+		c.Assert(info.InstanceName().String(), DeepEquals, snapName)
 		return []store.SnapResourceResult{
 			{
 				DownloadInfo: snap.DownloadInfo{
@@ -8331,7 +8378,7 @@ func (s *validationSetsSuite) testUpdateComponentsValidationSets(c *C, opts test
 		instanceKey = "key"
 		channel     = "channel-for-components"
 	)
-	instanceName := snap.InstanceName(snapName, instanceKey)
+	instanceName := snap.InstanceName(snapName, instanceKey).String()
 
 	snapID := snaptest.AssertedSnapID(snapName)
 
@@ -8397,7 +8444,7 @@ func (s *validationSetsSuite) testUpdateComponentsValidationSets(c *C, opts test
 	defer restore()
 
 	s.fakeStore.snapResourcesFn = func(info *snap.Info) []store.SnapResourceResult {
-		c.Assert(info.InstanceName(), DeepEquals, instanceName)
+		c.Assert(info.InstanceName().String(), DeepEquals, instanceName)
 		results := make([]store.SnapResourceResult, 0, len(opts.comps))
 		for _, c := range opts.comps {
 			results = append(results, store.SnapResourceResult{

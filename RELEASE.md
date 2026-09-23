@@ -403,6 +403,8 @@ Steps:
 
 *Note: It may sometimes be necessary to add content to the debs that is not in the snap (e.g. to fix an autopkgtest). The preferred way of doing so is to open a PR against the release branch with the cherry-picked changes.*
 
+Release pull requests that target `release/<version>` run this check before the manual upload below. [`.github/workflows/deb-verify.yaml`](.github/workflows/deb-verify.yaml) builds the source packages, uploads them to [`ppa:snappy-dev/beta`](https://launchpad.net/~snappy-dev/+archive/ubuntu/beta), and runs autopkgtests after every architecture has built. The official upload in the rest of this section is unchanged.
+
 ##### Preliminary work
 
 If you have never done this step before, you might need to patch your `gbp` tool:

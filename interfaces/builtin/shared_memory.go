@@ -341,7 +341,7 @@ func (iface *sharedMemoryInterface) MountConnectedPlug(spec *mount.Specification
 	}
 
 	return spec.AddMountEntry(osutil.MountEntry{
-		Name:    filepath.Join(devShm, "snap."+plug.Snap().InstanceName()),
+		Name:    filepath.Join(devShm, "snap."+plug.Snap().InstanceName().String()),
 		Dir:     "/dev/shm",
 		Options: []string{"bind", "rw"},
 	})
@@ -354,6 +354,10 @@ func (iface *sharedMemoryInterface) ParallelInstancesSupportedForPlug(plug *snap
 		return errors.New(`"private" attribute must be set to true`)
 	}
 	return nil
+}
+
+func (iface *sharedMemoryInterface) ParallelInstancesSupportedForSlot(_ *snap.SlotInfo) error {
+	return errors.New("conflicting operations on the same shared memory")
 }
 
 func (iface *sharedMemoryInterface) AutoConnect(plug *snap.PlugInfo, slot *snap.SlotInfo) bool {

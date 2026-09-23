@@ -65,6 +65,8 @@ func (s *snapmgrTestSuite) TestRemoveTasks(c *C) {
 
 	c.Assert(s.state.TaskCount(), Equals, len(ts.Tasks()))
 	verifyRemoveTasks(c, ts)
+	t := findKindInTaskSet(ts, "auto-disconnect")
+	c.Assert(t.Has("full-remove"), Equals, true)
 }
 
 func (s *snapmgrTestSuite) TestRemoveTasksAutoSnapshotDisabled(c *C) {
@@ -1039,6 +1041,9 @@ func (s *snapmgrTestSuite) TestRemoveLastRevisionRunThrough(c *C) {
 	c.Assert(err, IsNil)
 	chg.AddAll(ts)
 
+	t := findKindInTaskSet(ts, "auto-disconnect")
+	c.Assert(t.Has("full-remove"), Equals, true)
+
 	s.settle(c)
 
 	expected := fakeOps{
@@ -1805,7 +1810,7 @@ func (f *snapdBackend) RemoveSnapCommonData(info *snap.Info, opts *dirs.SnapDirO
 }
 
 func (f *snapdBackend) RemoveSnapSaveData(info *snap.Info, dev snap.Device) error {
-	dir := snap.CommonDataSaveDir(info.InstanceName())
+	dir := snap.CommonDataSaveDir(info.InstanceName().String())
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("unexpected error: %v", err)
 	}
