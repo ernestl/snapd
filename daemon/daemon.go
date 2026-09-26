@@ -573,6 +573,12 @@ func (d *Daemon) Start(ctx context.Context) (err error) {
 
 	// notify systemd that we are ready
 	systemdSdNotify("READY=1")
+	// READY was already sent. A boot id read error must not fail startup.
+	bootID, bootErr := osutil.BootID()
+	if bootErr != nil {
+		bootID = ""
+	}
+	seclog.LogSystemStartupSnapd(d.Version, bootID)
 	return nil
 }
 

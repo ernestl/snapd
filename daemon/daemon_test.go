@@ -621,6 +621,7 @@ func (s *daemonSuite) TestStartStop(c *check.C) {
 	defer seclog.Setup(seclog.NewNopLogger())
 
 	d := s.newTestDaemon(c)
+	d.Version = "2.78"
 	// mark as already seeded
 	s.markSeeded(d)
 	// and pretend we have snaps
@@ -681,7 +682,14 @@ version: 1`, si)
 	c.Check(err, check.IsNil)
 
 	c.Check(s.notified, check.DeepEquals, []string{extendedTimeoutUSec, "READY=1", "STOPPING=1"})
-	c.Check(seclogBuf.String(), check.Equals, "")
+	bootID, err := osutil.BootID()
+	c.Assert(err, check.IsNil)
+	c.Check(seclogBuf.String(), testutil.Contains, "sys_startup_snapd")
+	c.Check(seclogBuf.String(), testutil.Contains, "Snapd startup")
+	c.Check(seclogBuf.String(), testutil.Contains, `[snapd_version="2.78"]`)
+	c.Check(seclogBuf.String(), testutil.Contains, `[boot_id="`+bootID+`"]`)
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_restart_snapd")
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_standby_snapd")
 }
 
 func (s *daemonSuite) TestRestartWiring(c *check.C) {
@@ -1359,6 +1367,10 @@ func (s *daemonSuite) TestRestartExpectedRebootDidNotHappen(c *check.C) {
 	r := MockReboot(rebootCheck)
 	defer r()
 
+	seclogBuf := &bytes.Buffer{}
+	seclog.Setup(seclogtest.MockSecurityLogger(seclogBuf))
+	defer seclog.Setup(seclog.NewNopLogger())
+
 	d := s.newTestDaemon(c)
 	c.Check(d.overlord, check.IsNil)
 	c.Check(d.expectedRebootDidNotHappen, check.Equals, true)
@@ -1371,6 +1383,7 @@ func (s *daemonSuite) TestRestartExpectedRebootDidNotHappen(c *check.C) {
 	c.Check(n, check.Equals, 1)
 
 	c.Assert(d.Start(context.Background()), check.IsNil)
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_startup_snapd")
 
 	c.Check(s.notified, check.DeepEquals, []string{"READY=1"})
 
@@ -1481,6 +1494,7 @@ func (s *daemonSuite) TestRestartIntoSocketModePendingChanges(c *check.C) {
 	defer restore()
 
 	d := s.newTestDaemon(c)
+	d.Version = "2.78"
 	makeDaemonListeners(c, d)
 
 	// mark as already seeded, we also have no snaps so this will
@@ -1516,7 +1530,14 @@ func (s *daemonSuite) TestRestartIntoSocketModePendingChanges(c *check.C) {
 	// when the daemon got a pending change it just restarts
 	err := d.Stop(nil)
 	c.Check(err, check.IsNil)
-	c.Check(seclogBuf.String(), check.Equals, "")
+	bootID, err := osutil.BootID()
+	c.Assert(err, check.IsNil)
+	c.Check(seclogBuf.String(), testutil.Contains, "sys_startup_snapd")
+	c.Check(seclogBuf.String(), testutil.Contains, "Snapd startup")
+	c.Check(seclogBuf.String(), testutil.Contains, `[snapd_version="2.78"]`)
+	c.Check(seclogBuf.String(), testutil.Contains, `[boot_id="`+bootID+`"]`)
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_restart_snapd")
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_standby_snapd")
 }
 
 func (s *daemonSuite) TestConnTrackerCanShutdown(c *check.C) {
@@ -1572,6 +1593,10 @@ func (s *daemonSuite) TestDegradedModeReply(c *check.C) {
 }
 
 func (s *daemonSuite) TestHandleUnexpectedRestart(c *check.C) {
+	seclogBuf := &bytes.Buffer{}
+	seclog.Setup(seclogtest.MockSecurityLogger(seclogBuf))
+	defer seclog.Setup(seclog.NewNopLogger())
+
 	os.Setenv("SNAPD_REVERT_TO_REV", "999")
 	defer os.Unsetenv("SNAPD_REVERT_TO_REV")
 
@@ -1581,6 +1606,7 @@ func (s *daemonSuite) TestHandleUnexpectedRestart(c *check.C) {
 	s.markSeeded(d)
 
 	c.Assert(d.Start(context.Background()), check.Equals, ErrNoFailureRecoveryNeeded)
+	c.Check(seclogBuf.String(), check.Not(testutil.Contains), "sys_startup_snapd")
 }
 
 func clientForSnapdSocket() *http.Client {
