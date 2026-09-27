@@ -215,7 +215,7 @@ The CI tooling will check and enforce the order and required sections when a spr
 
 * Large moving of code around and changes to code placement might also be better done separately.
 
-* PR summaries and the first line of commit messages are expected to be of this form:
+* The PR title is expected to be of this form:
   * *`affected full packages:  short summary in lowercase`*
     * When too many packages are involved, many can be used instead, or sometimes package names can be abbreviated by using single letters for the top-level package, when non ambiguous combined with the subpackage.
     * Examples:
@@ -225,6 +225,14 @@ The CI tooling will check and enforce the order and required sections when a spr
       * `many: correct struct fields and output key`
   * When no golang code is involved, the context prefix before the colon can refer to directories or top-level files instead.
     * `build-aux,.github/workflows: limit make processes with nproc`
+
+* [Request Template](PULL_REQUEST_TEMPLATE.md)
+  * Change summary: Help reviewers follow non-trivial changes.
+  * Release note: One sentence for the snapcraft forum audience. Write it so a reporter can recognise the fix for the bug they reported, or a feature or change they requested.
+  * `feature` is an agreed name from [release-tools/features.yaml](release-tools/features.yaml), or `N/A`. If a feature name was agreed and is not yet in that list, add it as part of the PR.
+  * Category: Select one or more. For example, an internal bug fix to packaging ticks `bug-fix`, `packaging`, and `internal`. The pull request fixes a packaging defect that was found and fixed before it was released.
+  * Priority: Select one or more. `SLA` means a service-level agreement applies. `critical`, `high`, `medium`, and `low` are urgency.
+  * References: `contributor` is who the change comes from, `report link` is where it was reported, `issue link` is the tracking issue, and `spec link` is the specification. Use `N/A` when a reference does not apply.
 
 * Merging
   * Only use `Squash and Merge` or `Rebase and Merge`, never `Create a merge commit`

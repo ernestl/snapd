@@ -1,0 +1,45 @@
+# Names allowed in the release-note feature field, other than none and interface names.
+# Add a name in the pull request that introduces the banner.
+features:
+  - name: parallel-instances
+    description: Install the same snap more than once.
+  - name: hotplug
+    description: Create slots dynamically from system hardware.
+  - name: user-daemons
+    description: Run snap services in user sessions.
+  - name: hidden-snap-folder
+    description: Store snap data in ~/.snap/data instead of ~/snap.
+  - name: move-snap-home-dir
+    description: Move snap user data from ~/snap or ~/.snap/data to ~/Snap.
+  - name: check-disk-space-install
+    description: Check free disk space before installing a snap.
+  - name: check-disk-space-refresh
+    description: Check free disk space before refreshing a snap.
+  - name: check-disk-space-remove
+    description: Check free disk space before creating a snapshot on snap removal.
+  - name: gate-auto-refresh-hook
+    description: Let snaps control refresh through the gate-auto-refresh hook.
+  - name: confdb
+    description: Configuration based on a confdb and views.
+  - name: apparmor-prompting
+    description: Prompt the user when AppArmor would deny an app operation.
+  - name: content-compatibility-label
+    description: Compatibility labels for the content interface.
+  - name: clustering
+    description: Cluster snapd devices.
+  - name: remote-device-management
+    description: Remotely manage a device through the store, including its confdb.
+  - name: seed-refresh
+    description: Create a seed while refreshing model snaps.
+  - name: snap-delta-format
+    description: Download snap updates as snap-delta diffs.
+  - name: dm-verity
+    description: Verify snap integrity with dm-verity.
+  - name: targets
+    description: Snaps selected as refresh targets.
+  - name: tpm-fde
+    description: TPM-backed full disk encryption.
+  - name: uc-tracks
+    description: Tracks for the snapd snaps used on the corresponding Ubuntu Core.
+  - name: security-logging
+    description: Record security events.
