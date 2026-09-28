@@ -2,10 +2,10 @@
 """Report whether the reference links in a pull request exist.
 
 The input is a GitHub pull request link. gh reads the pull request body.
-The references fence supplies report link, issue link, and spec link.
-N/A is accepted. Any other value is one http or https URL, and the
-stdlib requests it. This command does not check contributor, and it
-does not suggest a category or a priority. It prints the decision and
+The References section supplies report link, issue link, and spec link.
+N/A in any case is accepted. Any other value is one http or https URL, and the
+stdlib requests it. This command does not suggest a category or a
+priority. It prints the decision and
 exits 0. It does not fail a CI job, and it does not tick a template box.
 
 Links is yes when every checked key is present and each value is N/A
@@ -38,8 +38,13 @@ PR_RE = re.compile(
 )
 
 _URL_RE = re.compile(r"^https?://\S+$")
+_MARKDOWN_LINK_RE = re.compile(r"^\[([^\[\]]*)\]\((https?://[^)\s]+)\)$")
+# **label:** value, **label**: value, or label: value.
+_FIELD_RE = re.compile(
+    r"^(?:\*\*)?(?P<key>[^*:\n]+?)(?:\*\*)?\s*:\s*(?:\*\*\s*)?(?P<value>.*)$"
+)
 
-# Checked keys, in report order. contributor is not one of them.
+# Checked keys, in report order.
 LINK_KEYS = ("report link", "issue link", "spec link")
 
 _LABELS = {
@@ -78,54 +83,74 @@ class Reference(NamedTuple):
     detail: str
 
 
-def _references_fence(body):
-    """Return the body of the first references fence, or None."""
+def _section(body, heading):
+    """Return the lines under a markdown heading, until the next heading.
+
+    The match is the heading text, ignoring the leading # marks and case.
+    A missing heading returns None.
+    """
     inside = False
     collected = []
-    for line in body.splitlines():
+    target = heading.strip().lower()
+    for line in (body or "").splitlines():
         stripped = line.strip()
-        if not inside:
-            opener = stripped[3:].strip() if stripped.startswith("```") else ""
-            inside = opener == "references"
+        if stripped.startswith("#"):
+            name = stripped.lstrip("#").strip().lower()
+            if inside:
+                break
+            inside = name == target
             continue
-        if stripped.startswith("```"):
-            return "\n".join(collected)
-        collected.append(line)
-    return None
+        if inside:
+            collected.append(line)
+    if not inside:
+        return None
+    return "\n".join(collected)
 
 
 def parse_references(body):
-    """Return the link keys present in the first references fence.
+    """Return the link keys present under the References heading.
 
-    A key maps to its stripped value. A key that is not in the fence is
-    absent from the result. contributor is ignored.
+    A key maps to its stripped value. A key that is not in that section
+    is absent from the result.
     """
-    text = _references_fence(body or "")
+    text = _section(body, "References")
     if text is None:
         return {}
     found = {}
     for line in text.splitlines():
-        if ":" not in line:
+        match = _FIELD_RE.match(line.strip())
+        if not match:
             continue
-        key, value = line.split(":", 1)
-        key = key.strip()
+        key = match.group("key").strip()
         if key in LINK_KEYS:
-            found[key] = value.strip()
+            found[key] = match.group("value").strip()
     return found
+
+
+def _one_url(value):
+    """Return the URL when value is one plain or markdown link."""
+    if _URL_RE.match(value):
+        return value
+    match = _MARKDOWN_LINK_RE.match(value)
+    if not match:
+        return ""
+    return match.group(2)
 
 
 def classify_value(value):
     """Return (kind, detail) for one reference value.
 
     kind is blank, na, url, or not a link. detail is the URL, or the
-    original value when it is not a link, and empty otherwise.
+    original value when it is not a link, and empty otherwise. A
+    markdown link [label](url) is the same as the plain URL.
     """
     if value == "":
         return "blank", ""
-    if value == "N/A":
+    if value.lower() == "n/a":
         return "na", ""
-    if _URL_RE.match(value):
-        return "url", value
+    url = _one_url(value)
+    if url:
+        return "url", url
     return "not a link", value
 
 
@@ -239,7 +264,8 @@ def print_help(out=None):
     width = max(len(name) for name, _desc in flags)
     print("Report whether the reference links in a pull request exist.", file=out)
     print(file=out)
-    print("report link, issue link, and spec link are N/A or one URL.", file=out)
+    print("report link, issue link, and spec link are N/A, in any", file=out)
+    print("case, or one URL.", file=out)
     print("The command requests each URL. It prints the decision and", file=out)
     print("exits 0. It does not fail a build.", file=out)
     print(file=out)

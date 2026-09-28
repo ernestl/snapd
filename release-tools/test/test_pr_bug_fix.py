@@ -42,12 +42,11 @@ ADVISORY = "https://github.com/canonical/snapd/security/advisories/" + _ADVISORY
 
 
 def fence(fields):
-    """Return a references fence. fields maps a link key to its value."""
-    lines = ["```references", "contributor: snapd team"]
+    """Return a References section. fields maps a link key to its value."""
+    lines = ["## References", ""]
     for key in bf.LINK_KEYS:
         if key in fields:
-            lines.append(f"{key}: {fields[key]}")
-    lines.append("```")
+            lines.append(f"**{key}:** {fields[key]}")
     return "\n".join(lines)
 
 
@@ -174,6 +173,14 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Launchpad", out)
         self.assertIn("<pull-request>", out)
         self.assertIn("exits 0", out)
+
+    def test_markdown_launchpad_link_qualifies(self):
+        markdown = "[branch](" + LAUNCHPAD + ")"
+        rc, out, err, _commands, requests = run_body(with_report(markdown))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(requests, [])
+        self.assertTrue(out.startswith("Bug-fix: yes\n"))
+        self.assertIn("Report link: launchpad " + LAUNCHPAD, out)
 
     def test_launchpad_host_qualifies(self):
         rc, out, err, _commands, requests = run_body(with_report(LAUNCHPAD))

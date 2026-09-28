@@ -229,10 +229,9 @@ The CI tooling will check and enforce the order and required sections when a spr
 * [Request Template](PULL_REQUEST_TEMPLATE.md)
   * Change summary: Help reviewers follow non-trivial changes.
   * Release note: One sentence for the snapcraft forum audience. Write it so a reporter can recognise the fix for the bug they reported, or a feature or change they requested.
-  * `feature` is an agreed name from [release-tools/features.yaml](release-tools/features.yaml), or `N/A`. If a feature name was agreed and is not yet in that list, add it as part of the PR.
-  * Category: Select one or more. For example, an internal bug fix to packaging ticks `bug-fix`, `packaging`, and `internal`. The pull request fixes a packaging defect that was found and fixed before it was released.
-  * Priority: Select one or more. `SLA` means a service-level agreement applies. `critical`, `high`, `medium`, and `low` are urgency.
-  * References: `contributor` is who the change comes from, `report link` is where it was reported, `issue link` is the tracking issue, and `spec link` is the specification. Use `N/A` when a reference does not apply.
+  * `feature` is an agreed name from [release-tools/features.yaml](release-tools/features.yaml), or `N/A`. If a feature name was agreed and is not yet in that list, add it as part of the PR. `release note` and `feature` are plain lines under Release note.
+  * Priority is set automatically. It is not part of the template.
+  * References: `report link` is where it was reported, `issue link` is the tracking issue, and `spec link` is the specification. They are plain lines under References. Use `N/A` when a reference does not apply.
 
 * Merging
   * Only use `Squash and Merge` or `Rebase and Merge`, never `Create a merge commit`

@@ -34,12 +34,11 @@ GH = "https://github.com/canonical/snapd/pull/1"
 
 
 def fence(fields):
-    """Return a references fence. fields maps a link key to its value."""
-    lines = ["```references", "contributor: snapd team"]
+    """Return a References section. fields maps a link key to its value."""
+    lines = ["## References", ""]
     for key in pl.LINK_KEYS:
         if key in fields:
-            lines.append(f"{key}: {fields[key]}")
-    lines.append("```")
+            lines.append(f"**{key}:** {fields[key]}")
     return "\n".join(lines)
 
 
@@ -162,6 +161,20 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Issue link: N/A", out)
         self.assertIn("Spec link: N/A", out)
 
+    def test_na_is_case_insensitive(self):
+        fields = {
+            "report link": "n/a",
+            "issue link": "N/a",
+            "spec link": "n/A",
+        }
+        rc, out, err, requests = run_body(fence(fields))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(requests, [])
+        self.assertTrue(out.startswith("Links: yes\n"))
+        self.assertIn("Report link: N/A", out)
+        self.assertIn("Issue link: N/A", out)
+        self.assertIn("Spec link: N/A", out)
+
     def test_existing_link(self):
         fields = all_na()
         fields["report link"] = LP
@@ -198,14 +211,28 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Issue link: absent", out)
         self.assertIn("Report link: N/A", out)
 
-    def test_missing_fence(self):
-        rc, out, err, requests = run_body("no references fence")
+    def test_missing_section(self):
+        rc, out, err, requests = run_body("no references section")
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual(requests, [])
         self.assertTrue(out.startswith("Links: no\n"))
         self.assertIn("Report link: absent", out)
         self.assertIn("Issue link: absent", out)
         self.assertIn("Spec link: absent", out)
+
+    def test_markdown_link_is_requested_as_the_url(self):
+        fields = all_na()
+        fields["spec link"] = "[SD236](https://docs.google.com/document/d/abc/edit)"
+        rc, out, err, requests = run_body(fence(fields), status=200)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertTrue(out.startswith("Links: yes\n"))
+        self.assertIn(
+            "Spec link: exists https://docs.google.com/document/d/abc/edit", out
+        )
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            requests[0].full_url, "https://docs.google.com/document/d/abc/edit"
+        )
 
     def test_value_is_not_a_link(self):
         fields = all_na()
