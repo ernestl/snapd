@@ -17,7 +17,9 @@ Interface is yes when at least one changed file is a definition.
 # pylint: disable=invalid-name,duplicate-code
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -110,6 +112,26 @@ def interface_decision(changed):
         if INTERFACE in file_kinds(item):
             return "yes"
     return "no"
+
+
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the interface decision. No label and no findings."""
+    decision = interface_decision(pull_request_files(pr))
+    return _contract().AreaReview("interface", (f"Interface: {decision}",), (), ())
 
 
 def _paths_for(changed, kind):

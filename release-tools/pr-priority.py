@@ -605,6 +605,30 @@ def decide(groups):
     return best
 
 
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the priority decision and the label when the level is known."""
+    level = decide(_grouped(assess(pull_request_body(pr))))
+    labels = ()
+    if level in ("critical", "high", "medium", "low"):
+        labels = (level,)
+    fact = f"Priority: {level}"
+    return _contract().AreaReview("priority", (fact,), labels, ())
+
+
 def print_result(link, found, out=None):
     """Print the priority decision, then one line per source.
 

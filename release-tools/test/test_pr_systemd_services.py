@@ -174,6 +174,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Other files: 1", out)
         self.assertIn("data/systemd/snapd.service.in", out)
         self.assertIn("daemon/daemon.go", out)
+        with StubGh(payload):
+            result = ss.review(ss.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Systemd services: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_session_agent_socket_is_listed(self):
         path = "data/systemd-user/snapd.session-agent.socket"

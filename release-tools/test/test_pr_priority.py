@@ -286,6 +286,23 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Salesforce: none", out)
         self.assertIn("Jira: none", out)
         self.assertIn("GitHub issue: none", out)
+        with patch.dict(
+            pp.os.environ,
+            {
+                "JIRA_EMAIL": "",
+                "JIRA_API_TOKEN": "",
+                "SALESFORCE_ACCESS_TOKEN": "",
+                "SALESFORCE_INSTANCE_URL": "",
+                "SALESFORCE_SEVERITY_FIELD": "",
+                "JIRA_BUG_LINK_FIELD": "",
+            },
+            clear=False,
+        ):
+            with StubGh(listed()), StubHTTP():
+                result = pp.review(pp.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Priority: unknown",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_na_is_case_insensitive(self):
         body = listed(**{"report link": "n/a", "issue link": "N/a", "spec link": "n/A"})
@@ -312,6 +329,25 @@ class TestCLI(unittest.TestCase):
             self.assertIn(f"Launchpad: {level}", out)
             self.assertEqual(len(requests), 1)
             self.assertIn("/bugs/1", requests[0].full_url)
+            if level == "high":
+                with patch.dict(
+                    pp.os.environ,
+                    {
+                        "JIRA_EMAIL": "",
+                        "JIRA_API_TOKEN": "",
+                        "SALESFORCE_ACCESS_TOKEN": "",
+                        "SALESFORCE_INSTANCE_URL": "",
+                        "SALESFORCE_SEVERITY_FIELD": "",
+                        "JIRA_BUG_LINK_FIELD": "",
+                    },
+                    clear=False,
+                ):
+                    with StubGh(listed(**{"report link": LP})):
+                        with StubHTTP(launchpad={"1": importance}):
+                            result = pp.review(pp.parse_pull_request(PR))
+                self.assertEqual(result.facts, ("Priority: high",))
+                self.assertEqual(result.labels, ("high",))
+                self.assertEqual(result.findings, ())
         rc, out, err, _commands, _requests = run_body(
             listed(**{"report link": LP}),
             launchpad={"1": "Undecided"},

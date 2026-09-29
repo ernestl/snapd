@@ -174,6 +174,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("build-aux/snap/snapcraft.yaml", out)
         self.assertIn("packaging/ubuntu-16.04/control", out)
         self.assertIn("packaging/ubuntu-26.04/rules", out)
+        with StubGh(payload):
+            result = pp.review(pp.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Packaging: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_cross_distro_and_vendoring_are_listed(self):
         payload = files_payload(

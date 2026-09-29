@@ -146,6 +146,7 @@ class TestCLI(unittest.TestCase):
         self.assertIn("features.yaml", out)
         self.assertIn("overwritten by", out)
         self.assertIn("<pull-request>", out)
+        self.assertIn("changes nothing", out)
         self.assertIn("exits 0", out)
 
     def test_missing_arguments_print_help(self):
@@ -153,9 +154,12 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(err, "")
         self.assertIn("Usage:", out)
-        rc, out, err = run_main([PR])
-        self.assertEqual(rc, 2)
-        self.assertIn("Usage:", out)
+        rc, out, err, calls = run_labels("")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Priority: not set (automatic)", out)
+        self.assertIn("Roadmap: no (automatic)", out)
+        self.assertEqual(added(calls), [])
+        self.assertEqual(removed(calls), [])
 
     def test_invalid_link(self):
         rc, _out, err = run_main(["not-a-pull-request", "critical"])

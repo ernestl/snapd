@@ -1,10 +1,14 @@
 #!/usr/bin/python3
+"""Unit tests for changelog.py."""
+
+# The debian import is deferred so a missing python3-debian skips the tests.
+# pylint: disable=missing-class-docstring,missing-function-docstring,import-outside-toplevel
 
 from io import StringIO
 import os
 import unittest
 
-fake_news_md = """
+FAKE_NEWS_MD = """
 # New in snapd 2.60.3:
 * Fix bug in the "private" plug attribute of the shared-memory
   interface that can result in a crash when upgrading from an
@@ -13,15 +17,13 @@ fake_news_md = """
   apparmor to support non-standard home directories
 """
 
-expected_changelog_entry = """
+EXPECTED_CHANGELOG_ENTRY = """
     - Fix bug in the "private" plug attribute of the shared-memory
       interface that can result in a crash when upgrading from an old
       version of snapd.
     - Fix missing integration of the /etc/apparmor.d/tunables/home.d/
       apparmor to support non-standard home directories
-"""[
-    1:
-]
+"""[1:]
 
 
 class TestChangelogReadNewsMd(unittest.TestCase):
@@ -29,19 +31,19 @@ class TestChangelogReadNewsMd(unittest.TestCase):
         try:
             # check whether python3-debian is installed, the tests could be run
             # on systems where the module is not package or otherwise available
-            import changelog  # noqa: F401
+            import changelog  # noqa: F401  # pylint: disable=unused-import
         except ModuleNotFoundError as err:
             if err.name == "debian":
                 raise unittest.SkipTest("skip test due to missing 'debian' module")
             raise
 
-        self.news_md = StringIO(fake_news_md)
+        self.news_md = StringIO(FAKE_NEWS_MD)
 
     def test_happy(self):
         import changelog
 
         changelog_entry = changelog.read_changelogs_news_md(self.news_md, "2.60.3")
-        self.assertEqual(changelog_entry, expected_changelog_entry)
+        self.assertEqual(changelog_entry, EXPECTED_CHANGELOG_ENTRY)
 
     def test_version_not_found(self):
         import changelog
@@ -50,7 +52,8 @@ class TestChangelogReadNewsMd(unittest.TestCase):
             changelog.read_changelogs_news_md(self.news_md, "1.1")
         self.assertEqual(
             str(cm.exception),
-            'cannot find expected version "1.1" in first header, found "New in snapd 2.60.3:"',
+            "cannot find expected version "
+            '"1.1" in first header, found "New in snapd 2.60.3:"',
         )
 
     def test_deb_email_happy(self):
@@ -73,14 +76,17 @@ class TestChangelogReadNewsMd(unittest.TestCase):
             changelog.validate_env_deb_email()
         self.assertEqual(
             str(e.exception),
-            'cannot find environment variable "DEBEMAIL", please provide DEBEMAIL="FirstName LastName <valid-email-address>"',
+            "cannot find environment variable "
+            '"DEBEMAIL", please provide DEBEMAIL="FirstName LastName '
+            '<valid-email-address>"',
         )
         os.environ["DEBEMAIL"] = "FirstName LastName <firstname.lastname.com>"
         with self.assertRaises(RuntimeError) as e:
             changelog.validate_env_deb_email()
         self.assertEqual(
             str(e.exception),
-            'environment variable "DEBEMAIL" uses incorrect format, expecting DEBEMAIL="FirstName LastName <valid-email-address>"',
+            'environment variable "DEBEMAIL" uses incorrect format, '
+            'expecting DEBEMAIL="FirstName LastName <valid-email-address>"',
         )
         if original:
             os.environ["DEBEMAIL"] = original

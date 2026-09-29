@@ -240,6 +240,11 @@ class TestCLI(unittest.TestCase):
         self.assertLess(out.index("Tests: 2"), out.index("Test configuration: 0"))
         self.assertLess(out.index("Test configuration: 0"), out.index("Other files: 0"))
         self.assertNotIn("export_test.go", out)
+        with StubGh(payload):
+            result = pto.review(pto.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Test only: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_configuration_is_listed(self):
         payload = files_payload(

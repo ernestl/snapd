@@ -28,6 +28,7 @@ exits 0 after a report.
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import re
@@ -517,6 +518,30 @@ def apply_changes(pr, changes):
         )
 
 
+def label_report(pr, link, words):
+    """Apply words, or report the current labels when words is empty.
+
+    The returned text is the same report the command prints.
+    """
+    tokens = parse_label_list(words) if words else ()
+    names = feature_names(pr)
+    if tokens:
+        labels, feature_request = resolve_labels(tokens, names)
+    else:
+        labels, feature_request = (), ()
+    changes = plan_changes(
+        labels,
+        set(issue_labels(pr)),
+        timeline(pr),
+        github_login(),
+        (names, feature_request),
+    )
+    apply_changes(pr, changes)
+    buf = io.StringIO()
+    print_result(link, changes, buf)
+    return buf.getvalue()
+
+
 def _headline(changes):
     """Return applied, override, or partial for the report headline.
 
@@ -561,8 +586,9 @@ def print_help(out=None):
     width = max(len(name) for name, _desc in flags)
     print("Apply allowlisted labels to a pull request.", file=out)
     print(file=out)
-    print("Each label is a separate word. The command prints the", file=out)
-    print("result and exits 0.", file=out)
+    print("Each label is a separate word. With no labels, the command", file=out)
+    print("reports the current values and changes nothing. The command", file=out)
+    print("prints the result and exits 0.", file=out)
     print("Only one priority label may be set.", file=out)
     print("The report always states every value. Roadmap is yes or no.", file=out)
     print("A priority is critical, high, medium, low, or not set.", file=out)
@@ -578,7 +604,7 @@ def print_help(out=None):
         print(f"  {name}: {', '.join(labels)}", file=out)
     print(file=out)
     print("Usage:", file=out)
-    print(f"  {prog} <pull-request> <label>...", file=out)
+    print(f"  {prog} <pull-request> [label...]", file=out)
     print(file=out)
     print("Examples:", file=out)
     example = f"  {prog} https://github.com/canonical/snapd/pull/17718 critical roadmap"
@@ -633,29 +659,22 @@ def main(argv=None):
         print_help()
         return 0
 
-    if not args.link or not args.labels:
+    if not args.link:
         print_help()
         return 2
 
     try:
-        tokens = parse_label_list(args.labels)
+        if args.labels:
+            parse_label_list(args.labels)
         pr = parse_pull_request(args.link)
-        names = feature_names(pr)
-        labels, feature_request = resolve_labels(tokens, names)
-        script_login = github_login()
-        current = issue_labels(pr)
-        events = timeline(pr)
-        changes = plan_changes(
-            labels, current, events, script_login, (names, feature_request)
-        )
-        apply_changes(pr, changes)
+        text = label_report(pr, args.link, args.labels)
     except UsageError as err:
         return _fail_usage(err)
     except RuntimeError as err:
         print(err, file=sys.stderr)
         return 1
 
-    print_result(args.link, changes)
+    print(text, end="")
     return 0
 
 

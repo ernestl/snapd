@@ -1,25 +1,40 @@
 #!/usr/bin/env python3
+"""Write snapd changelog entries for distro packages and GitHub releases."""
 
 import argparse
 import datetime
 import io
-import markdown
 import os
 import re
+import sys
 import textwrap
 from typing import NamedTuple
 
 from bs4 import BeautifulSoup, NavigableString, Tag
-
 import debian.changelog
+import markdown
 
 # Pattern to validate environment variable "DEBEMAIL"
-env_deb_email_pattern = re.compile(r"^[a-zA-Z]+\s[a-zA-Z]+ <[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}>$")
+env_deb_email_pattern = re.compile(
+    r"^[a-zA-Z]+\s[a-zA-Z]+ <[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}>$"
+)
+_DEBEMAIL_EXAMPLE = 'DEBEMAIL="FirstName LastName <valid-email-address>"'
+_MISSING_FEDORA_CHANGELOG = " ".join(
+    (
+        "'%changelog' line in fedora spec file not found",
+        "(was a comment or whitespace added to that line?)",
+    )
+)
 
 
 def parse_arguments():
+    """Return the version, Launchpad bug, and changelog file."""
     parser = argparse.ArgumentParser(description="automatic changelog writer for snapd")
-    parser.add_argument("version", type=str, help="new snapd version in the format <major>.<minor>[.<fix>]")
+    parser.add_argument(
+        "version",
+        type=str,
+        help="new snapd version in the format <major>.<minor>[.<fix>]",
+    )
     parser.add_argument("lpbug", type=str, help="new snapd major release LP bug number")
     parser.add_argument(
         "changelog",
@@ -30,6 +45,8 @@ def parse_arguments():
 
 
 class Distro(NamedTuple):
+    """One debian-like packaging target."""
+
     name: str  # name of the distro in the packaging directory
     debian_name: str  # debian distribution name
     version_suffix: str  # suffix to add to the version number in changelogs
@@ -57,7 +74,7 @@ def rewrite_version_number_file(file_name, pattern, version, write):
     back to the file as well.
     """
 
-    with open(file_name, "r") as fh:
+    with open(file_name, "r", encoding="utf-8") as fh:
         file_contents = fh.read()
 
     # replace the pattern (which should have one capturing group in it for the
@@ -73,17 +90,27 @@ def rewrite_version_number_file(file_name, pattern, version, write):
         raise RuntimeError(
             f"too many version patterns ({n}) matched in packaging file {file_name}"
         )
-    elif n < 1:
+    if n < 1:
         raise RuntimeError(f"version pattern not matched in packaging file {file_name}")
 
     if write is True:
-        with open(file_name, "w") as fh:
+        with open(file_name, "w", encoding="utf-8") as fh:
             fh.write(new_contents)
 
     return new_contents
 
 
+def _fedora_changelog_lines(new_changelog_entry, version, maintainer):
+    """Return Fedora changelog lines for one upstream release."""
+    dedented = [line[3:] + "\n" for line in new_changelog_entry.splitlines()]
+    date = datetime.datetime.now().strftime("%a %b %d %Y")
+    header = f"* {date} {maintainer[0]} <{maintainer[1]}>\n"
+    release = f"- New upstream release {version}\n"
+    return [header, release] + dedented
+
+
 def update_fedora_changelog(opts, snapd_packaging_dir, new_changelog_entry, maintainer):
+    """Insert an upstream release note into the Fedora spec changelog."""
     spec_file = os.path.join(snapd_packaging_dir, "fedora", "snapd.spec")
 
     # rewrite the snapd.spec file with the right version
@@ -94,38 +121,19 @@ def update_fedora_changelog(opts, snapd_packaging_dir, new_changelog_entry, main
         False,
     )
 
-    # now we also need to add the changelog entry to the snapd.spec file
-    # this is a bit tricky, since we want a different format for the
-    # changelog in snapd.spec than we have for debian, but luckily it's
-    # just trimming whitespace off the front of each line in the
-    # changelog
-
-    dedented_changelog_lines = []
-    for line in new_changelog_entry.splitlines():
-        # strip the first 3 characters which are space characters so
-        # that we only have one single whitespace
-        dedented_changelog_lines.append(line[3:] + "\n")
-
-    date = datetime.datetime.now().strftime("%a %b %d %Y")
-
-    date_and_maintainer_header = f"* {date} {maintainer[0]} <{maintainer[1]}>\n"
-    changelog_header = f"- New upstream release {opts.version}\n"
-    fedora_changelog_lines = [
-        date_and_maintainer_header,
-        changelog_header,
-    ] + dedented_changelog_lines
+    fedora_changelog_lines = _fedora_changelog_lines(
+        new_changelog_entry, opts.version, maintainer
+    )
 
     # find the start of the changelog section in the rewritten spec file bytes
     changelog_section = "\n%changelog\n"
     idx = spec_file_content.find(changelog_section)
     if idx < 0:
-        raise RuntimeError(
-            "'%changelog' line in fedora spec file not found (was a comment or whitespace added to that line?)"
-        )
+        raise RuntimeError(_MISSING_FEDORA_CHANGELOG)
     # rewrite the spec file using the replaced bits up to the changelog section,
     # then insert our new changelog entry lines, then add the rest of the
     # replaced bits of the spec file
-    with open(spec_file, "w") as fh:
+    with open(spec_file, "w", encoding="utf-8") as fh:
         # write the spec file up to and including the changelog section
         fh.write(spec_file_content[: idx + len(changelog_section)])
         # insert our new changelog entry
@@ -133,12 +141,14 @@ def update_fedora_changelog(opts, snapd_packaging_dir, new_changelog_entry, main
             fh.write(ch_line)
         fh.write("\n")
         # write the rest of the original spec file
-        fh.write(spec_file_content[idx + len(changelog_section):])
+        rest_at = idx + len(changelog_section)
+        fh.write(spec_file_content[rest_at:])
 
 
 def update_opensuse_changelog(
-    opts, snapd_packaging_dir, new_changelog_entry, maintainer
+    opts, snapd_packaging_dir, _new_changelog_entry, maintainer
 ):
+    """Prepend an upstream release note to the openSUSE changes file."""
     spec_file = os.path.join(snapd_packaging_dir, "opensuse", "snapd.spec")
     changes_file = os.path.join(snapd_packaging_dir, "opensuse", "snapd.changes")
 
@@ -164,23 +174,22 @@ def update_opensuse_changelog(
 
     # read the existing changes file and then write the new changelog entry at
     # the top and then write the rest of the file
-    with open(changes_file, "r") as fh:
+    with open(changes_file, "r", encoding="utf-8") as fh:
         current = fh.read()
-    with open(changes_file, "w") as fh:
+    with open(changes_file, "w", encoding="utf-8") as fh:
         fh.write(templ)
         fh.write(current)
 
 
 def write_github_release_entry(opts, new_changelog_entry):
-    with open(f"snapd-{opts.version}-github-release.md", "w") as fh:
+    """Write the GitHub release notes for this version."""
+    with open(f"snapd-{opts.version}-github-release.md", "w", encoding="utf-8") as fh:
         # write the prefix header
-        fh.write(
-            f"""New snapd release {opts.version}
+        fh.write(f"""New snapd release {opts.version}
 
 See https://forum.snapcraft.io/t/the-snapd-roadmap/1973 for high-level overview.
 
-"""
-        )
+""")
 
         # write the rest of the actual changelog
         for line in new_changelog_entry.splitlines():
@@ -191,6 +200,7 @@ See https://forum.snapcraft.io/t/the-snapd-roadmap/1973 for high-level overview.
 
 
 def read_changelogs_snappy_dch(new_changelog: io.TextIOWrapper):
+    """Return a snappy-dch entry after checking its line format."""
     new_changelog_entry = new_changelog.read()
 
     # verify that the changelog entry lines are all in the right format
@@ -209,21 +219,28 @@ def read_changelogs_snappy_dch(new_changelog: io.TextIOWrapper):
 
 
 def read_changelogs_news_md(changelog: io.TextIOWrapper, new_version: str):
+    """Return the newest NEWS.md section as a Debian changelog entry."""
     html = markdown.markdown(changelog.read())
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html, "html.parser")
     # precondition check, assume new_version is on top
     if new_version not in soup.h1.text:
-        raise RuntimeError(f'cannot find expected version "{new_version}" in first header, found "{soup.h1.text}"')
+        raise RuntimeError(
+            f'cannot find expected version "{new_version}" in first header, found "{soup.h1.text}"'
+        )
     # changelog format as expected by debian/changelog
     new_changelog = []
-    wrapper = textwrap.TextWrapper(initial_indent="    - ", subsequent_indent="      ", width=72)
+    wrapper = textwrap.TextWrapper(
+        initial_indent="    - ", subsequent_indent="      ", width=72
+    )
     for elm in soup.ul.children:
-        if type(elm) is Tag:
+        if isinstance(elm, Tag):
             text = elm.text
-        elif type(elm) is NavigableString:
+        elif isinstance(elm, NavigableString):
             text = elm
         else:
-            raise RuntimeError(f'expected list item as Tag or NavigableString but got "{type(elm)}"')
+            raise RuntimeError(
+                f'expected list item as Tag or NavigableString but got "{type(elm)}"'
+            )
 
         if not text.strip():
             continue
@@ -238,19 +255,25 @@ def read_changelogs_news_md(changelog: io.TextIOWrapper, new_version: str):
 
 
 def validate_env_deb_email():
-    env_deb_email = os.environ.get('DEBEMAIL')
+    """Require DEBEMAIL to be a name and an email address."""
+    env_deb_email = os.environ.get("DEBEMAIL")
     if not env_deb_email:
-        raise RuntimeError('cannot find environment variable "DEBEMAIL", please provide DEBEMAIL="FirstName LastName <valid-email-address>"')
-    elif not env_deb_email_pattern.match(env_deb_email):
-        raise RuntimeError('environment variable "DEBEMAIL" uses incorrect format, expecting DEBEMAIL="FirstName LastName <valid-email-address>"')
+        raise RuntimeError(
+            f'cannot find environment variable "DEBEMAIL", please provide {_DEBEMAIL_EXAMPLE}'
+        )
+    if not env_deb_email_pattern.match(env_deb_email):
+        raise RuntimeError(
+            f'environment variable "DEBEMAIL" uses incorrect format, expecting {_DEBEMAIL_EXAMPLE}'
+        )
 
 
 def main(opts):
+    """Update packaging changelogs and write the GitHub release notes."""
     try:
         validate_env_deb_email()
     except RuntimeError as e:
         print(f"{e}")
-        exit(1)
+        sys.exit(1)
 
     this_script = os.path.realpath(__file__)
     snapd_root_git_dir = os.path.dirname(os.path.dirname(this_script))
@@ -271,7 +294,7 @@ def main(opts):
         debian_packaging_changelog = os.path.join(
             snapd_packaging_dir, distro.name, "changelog"
         )
-        with open(debian_packaging_changelog) as fh:
+        with open(debian_packaging_changelog, encoding="utf-8") as fh:
             ch = debian.changelog.Changelog(fh)
 
         # setup a new block
@@ -291,7 +314,7 @@ def main(opts):
         ch.add_change(templ)
 
         # write it out back to the changelog file
-        with open(debian_packaging_changelog, "w") as fh:
+        with open(debian_packaging_changelog, "w", encoding="utf-8") as fh:
             ch.write_to_open_file(fh)
 
     # now handle all of the non-debian packaging files
@@ -318,5 +341,4 @@ def main(opts):
 
 
 if __name__ == "__main__":
-    opts = parse_arguments()
-    main(opts)
+    main(parse_arguments())

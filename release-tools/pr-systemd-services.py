@@ -18,7 +18,9 @@ units.
 # pylint: disable=invalid-name,duplicate-code
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -134,6 +136,27 @@ def systemd_decision(changed):
         if SYSTEMD in file_kinds(item):
             return "yes"
     return "no"
+
+
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the systemd decision. No label and no findings."""
+    decision = systemd_decision(pull_request_files(pr))
+    fact = f"Systemd services: {decision}"
+    return _contract().AreaReview("systemd-services", (fact,), (), ())
 
 
 def _paths_for(changed, kind):

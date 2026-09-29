@@ -273,6 +273,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Report link: N/A", out)
         self.assertIn("Issue link: N/A", out)
         self.assertIn("Spec link: N/A", out)
+        with StubGh(fence(all_na())), StubJira(None):
+            result = bf.review(bf.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Bug-fix: no",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_missing_link_argument_prints_help(self):
         rc, out, err = run_main([])

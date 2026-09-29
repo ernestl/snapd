@@ -38,6 +38,28 @@ def decide(effort):
     return "required"
 
 
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the change-summary decision. No label and no findings."""
+    link = f"https://github.com/{pr.slug}/pull/{pr.number}"
+    decision = decide(effort_for_link(link))
+    fact = f"Change summary: {decision}"
+    return _contract().AreaReview("summary", (fact,), (), ())
+
+
 def print_result(link, effort, out=None):
     """Print the change-summary decision, then the details.
 

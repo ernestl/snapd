@@ -1276,11 +1276,10 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_search_helpers_handle_empty_payload(self):
         calls = []
 
-        class EmptySearch:
+        class EmptySearch:  # pylint: disable=too-few-public-methods
             def search_and_reconsile_issues_using_jql_post(self, data=None, **kwargs):
                 del kwargs
                 calls.append(data)
-                return None
 
         jira = EmptySearch()
         self.assertIsNone(crt.find_epic(jira, "Snapd Major Release 2.78"))
@@ -1302,7 +1301,7 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_find_epic_filters_fuzzy_summary_matches(self):
         """summary ~ is a text match, so only an exact summary may be reused."""
 
-        class FuzzySearch:
+        class FuzzySearch:  # pylint: disable=too-few-public-methods
             def search_and_reconsile_issues_using_jql_post(self, data=None, **kwargs):
                 del data, kwargs
                 return {
@@ -1331,7 +1330,7 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_search_follows_next_page_token(self):
         bodies = []
 
-        class PagedJira:
+        class PagedJira:  # pylint: disable=too-few-public-methods
             def search_and_reconsile_issues_using_jql_post(self, data=None, **kwargs):
                 del kwargs
                 bodies.append(data)
@@ -1355,7 +1354,7 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_search_stops_at_limit(self):
         bodies = []
 
-        class EndlessJira:
+        class EndlessJira:  # pylint: disable=too-few-public-methods
             def search_and_reconsile_issues_using_jql_post(self, data=None, **kwargs):
                 del kwargs
                 bodies.append(data)
@@ -1373,7 +1372,7 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_list_children_pages_to_the_search_bound(self):
         bodies = []
 
-        class PagedJira:
+        class PagedJira:  # pylint: disable=too-few-public-methods
             def search_and_reconsile_issues_using_jql_post(self, data=None, **kwargs):
                 del kwargs
                 bodies.append(data)
@@ -1489,10 +1488,9 @@ class TestDryRunAndApply(unittest.TestCase):
     def test_field_lookups_handle_empty_payload(self):
         """An empty /field body must still yield the actionable CLI error."""
 
-        class EmptyFields:
+        class EmptyFields:  # pylint: disable=too-few-public-methods
             def get_fields(self, data=None, **kwargs):
                 del data, kwargs
-                return None
 
         jira = EmptyFields()
         for resolver, field in (
@@ -1559,9 +1557,9 @@ class TestDryRunAndApply(unittest.TestCase):
 
     def test_connect_jira_uses_cloud_v3(self):
         try:
-            import atlassian.jira as jira_mod
-        except ImportError:
-            raise unittest.SkipTest("atlassian-python-api is not installed")
+            import atlassian.jira as jira_mod  # pylint: disable=import-outside-toplevel
+        except ImportError as exc:
+            raise unittest.SkipTest("atlassian-python-api is not installed") from exc
         with patch.object(jira_mod, "JiraCloud") as mock_cls:
             mock_cls.return_value = object()
             crt.connect_jira("https://jira.example", "a@b.c", "token")

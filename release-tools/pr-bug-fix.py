@@ -17,6 +17,7 @@ Bug-fix is yes when at least one of those links qualifies.
 
 import argparse
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -343,6 +344,27 @@ def bug_fix_decision(rows):
         if row.kind in _QUALIFYING:
             return "yes"
     return "no"
+
+
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the bug-fix decision. No label and no findings."""
+    rows = reference_rows(pr)
+    fact = f"Bug-fix: {bug_fix_decision(rows)}"
+    return _contract().AreaReview("bug-fix", (fact,), (), ())
 
 
 def _detail_line(row):

@@ -198,6 +198,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Added: 1", out)
         self.assertIn(f"confdb: {CONFDB}", out)
         self.assertNotIn("Incomplete:", out)
+        with StubGh({BASE: base, HEAD: head}):
+            result = pf.review(pf.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Feature: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_name_without_description(self):
         base = features_text(("confdb", CONFDB))

@@ -160,6 +160,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Report link: N/A", out)
         self.assertIn("Issue link: N/A", out)
         self.assertIn("Spec link: N/A", out)
+        with StubGh(fence(all_na())), StubHTTP(None):
+            result = pl.review(pl.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Links: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_na_is_case_insensitive(self):
         fields = {

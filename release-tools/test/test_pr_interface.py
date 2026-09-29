@@ -167,6 +167,11 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Other files: 1", out)
         self.assertIn("interfaces/builtin/alsa.go", out)
         self.assertIn("daemon/daemon.go", out)
+        with StubGh(payload):
+            result = pi.review(pi.parse_pull_request(PR))
+        self.assertEqual(result.facts, ("Interface: yes",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
 
     def test_common_go_is_an_interface(self):
         with StubGh(files_payload([("interfaces/builtin/common.go", "")])):

@@ -90,8 +90,14 @@ class TestCLI(unittest.TestCase):
     def test_optional(self):
         with patch.object(ps, "effort_for_link", return_value=12):
             rc, out, err = run_main([PR])
+            result = ps.review(
+                type("PR", (), {"slug": "canonical/snapd", "number": "17718"})()
+            )
         self.assertEqual((rc, err), (0, ""))
         self.assertTrue(out.startswith("Change summary: optional\n"))
+        self.assertEqual(result.facts, ("Change summary: optional",))
+        self.assertEqual(result.labels, ())
+        self.assertEqual(result.findings, ())
         self.assertLess(out.index("Change summary:"), out.index("Details:"))
         self.assertLess(out.index("Details:"), out.index(f"Pull request: {PR}"))
         self.assertLess(out.index(f"Pull request: {PR}"), out.index("Effort: 12.0"))

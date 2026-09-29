@@ -16,7 +16,9 @@ has a description.
 # pylint: disable=invalid-name,duplicate-code
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -125,6 +127,27 @@ def feature_decision(change):
     if change.added:
         return "yes"
     return "no"
+
+
+def _contract():
+    """Load review.py. The hyphenated scripts cannot import it by name."""
+    name = "snapd_release_review"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "review.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def review(pr):
+    """Return the feature-file decision. No label and no findings."""
+    change = feature_change(pr)
+    fact = f"Feature: {feature_decision(change)}"
+    return _contract().AreaReview("feature", (fact,), (), ())
 
 
 def print_result(link, change, out=None):
