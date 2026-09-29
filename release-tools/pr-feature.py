@@ -71,11 +71,13 @@ def _scalar(text):
 
 
 def parse_features(text):
-    """Return name to description for the features sequence.
+    """Return name to description for every feature entry.
 
-    Each entry is one "- name:" line and an optional following
-    "description:" line, which is how release-tools/features.yaml is
-    written. A name with no description is kept with an empty string.
+    Entries live under experimental, previously-experimental, or
+    non-experimental. Each entry is one "- name:" line and an optional
+    following "description:" line. The section key is ignored, so a name
+    in any list is one feature.
+    A name with no description is kept with an empty string.
     """
     features = {}
     current = None

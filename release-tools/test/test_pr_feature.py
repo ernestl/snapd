@@ -155,6 +155,27 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(change.added, ())
         self.assertEqual(change.incomplete, ())
 
+    def test_both_sections_are_read(self):
+        text = (
+            "experimental:\n"
+            "  - name: confdb\n"
+            f"    description: {CONFDB}\n"
+            "previously-experimental:\n"
+            "  - name: layouts\n"
+            "    description: Rearrange files inside a snap with layouts.\n"
+            "non-experimental:\n"
+            "  - name: dm-verity\n"
+            "    description: Verify snap integrity with dm-verity.\n"
+        )
+        self.assertEqual(
+            pf.parse_features(text),
+            {
+                "confdb": CONFDB,
+                "layouts": "Rearrange files inside a snap with layouts.",
+                "dm-verity": "Verify snap integrity with dm-verity.",
+            },
+        )
+
 
 class TestCLI(unittest.TestCase):
     def test_help(self):

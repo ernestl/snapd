@@ -1,6 +1,7 @@
-# Names allowed in the release-note feature field, other than none and interface names.
-# Add a name in the pull request that introduces the banner.
-features:
+# Feature label names. A pull request may have one.
+# A name added in the pull request counts once it is in this file.
+# Entries live under experimental, previously-experimental, or non-experimental.
+experimental:
   - name: parallel-instances
     description: Install the same snap more than once.
   - name: hotplug
@@ -33,6 +34,28 @@ features:
     description: Create a seed while refreshing model snaps.
   - name: snap-delta-format
     description: Download snap updates as snap-delta diffs.
+previously-experimental:
+  - name: layouts
+    description: Rearrange files inside a snap with layouts.
+  - name: snapd-snap
+    description: Install snapd from the snapd snap on classic.
+  - name: per-user-mount-namespace
+    description: Keep a persistent per-user mount namespace.
+  - name: refresh-app-awareness
+    description: Defer refresh while a snap application is running.
+  - name: robust-mount-namespace-updates
+    description: Update a snap mount namespace without breaking running processes.
+  - name: classic-preserves-xdg-runtime-dir
+    description: Preserve XDG_RUNTIME_DIR for snaps on classic.
+  - name: dbus-activation
+    description: Activate snap services through D-Bus.
+  - name: quota-groups
+    description: Limit snap resource use with quota groups.
+  - name: refresh-app-awareness-ux
+    description: Tell the user before a refresh closes a running snap application.
+  - name: confdb-control
+    description: Control a device confdb through the confdb-control assertion.
+non-experimental:
   - name: dm-verity
     description: Verify snap integrity with dm-verity.
   - name: targets

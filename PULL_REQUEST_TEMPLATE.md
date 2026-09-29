@@ -3,10 +3,11 @@
 
 ## Release note
 
-The release note should be concise, accurate and suitable for the snapcraft forum audience. Name the agreed feature name or N/A otherwise.
+The release note should be concise, accurate and suitable for the snapcraft forum audience.
 
-**release note:**
-**feature:**
+**release note:** `<add your note here>`
+Omit means this sentence is not copied into the final release notes. The release note is still written.
+- [ ] Omit
 
 ## References
 

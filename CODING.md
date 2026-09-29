@@ -228,8 +228,8 @@ The CI tooling will check and enforce the order and required sections when a spr
 
 * [Request Template](PULL_REQUEST_TEMPLATE.md)
   * Change summary: Help reviewers follow non-trivial changes.
-  * Release note: One sentence for the snapcraft forum audience. Write it so a reporter can recognise the fix for the bug they reported, or a feature or change they requested.
-  * `feature` is an agreed name from [release-tools/features.yaml](release-tools/features.yaml), or `N/A`. If a feature name was agreed and is not yet in that list, add it as part of the PR. `release note` and `feature` are plain lines under Release note.
+  * Release note: One sentence for the snapcraft forum audience. Write it so a reporter can recognise the fix for the bug they reported, or a feature or change they requested. Omit means the sentence is not copied into the final release notes. The release note is still written.
+  * Feature is a pull request label. It is one name from [release-tools/features.yaml](release-tools/features.yaml). A name introduced in this pull request counts once it is added to that file.
   * Priority is set automatically. It is not part of the template.
   * References: `report link` is where it was reported, `issue link` is the tracking issue, and `spec link` is the specification. They are plain lines under References. Use `N/A` when a reference does not apply.
 
