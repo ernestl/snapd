@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Unit tests for pr-review.py.
+"""Unit tests for pr-annotation-review.py.
 
 The script filename contains a hyphen, so tests load it with importlib.
 """
@@ -24,7 +24,7 @@ def load_module(filename, name):
     return mod
 
 
-rv = load_module("pr-review.py", "pr_review")
+rv = load_module("pr-annotation-review.py", "pr_annotation_review")
 contract = load_module("review.py", "snapd_release_review_for_tests")
 PR = "https://github.com/canonical/snapd/pull/17718"
 LABELS = "\n".join(
@@ -77,7 +77,7 @@ class TestComment(unittest.TestCase):
         reviews = sample_reviews()
         comment = rv.render_comment("Ship the fix.", "yes", LABELS, reviews, "fail")
         self.assertTrue(comment.startswith(rv.MARKER + "\n"))
-        self.assertIn("Review: fail\n", comment)
+        self.assertIn("PR annotation review: fail\n", comment)
         self.assertIn("## Information\n", comment)
         self.assertIn("Release note: Ship the fix.", comment)
         self.assertIn("Omit: yes", comment)
@@ -178,14 +178,14 @@ class TestCLI(unittest.TestCase):
         self.assertIn("unknown flag: --nope", err)
 
     def test_prints_without_publishing(self):
-        comment = rv.MARKER + "\nReview: approve\n"
+        comment = rv.MARKER + "\nPR annotation review: approve\n"
         with patch.object(rv, "run_review", return_value=(comment, "approve")):
             rc, out, err = run_main([PR])
         self.assertEqual((rc, err), (0, ""))
         self.assertEqual(out, comment)
 
     def test_error_finding_exits_1(self):
-        comment = rv.MARKER + "\nReview: fail\n"
+        comment = rv.MARKER + "\nPR annotation review: fail\n"
         with patch.object(rv, "run_review", return_value=(comment, "fail")):
             rc, out, err = run_main([PR])
         self.assertEqual(rc, 1)
@@ -216,7 +216,7 @@ class TestPublish(unittest.TestCase):
         _gh.calls = []
 
     def _run(self, verdict):
-        comment = f"{rv.MARKER}\nReview: {verdict}\n"
+        comment = f"{rv.MARKER}\nPR annotation review: {verdict}\n"
 
         def payload(command):
             if "--method" not in command:
@@ -248,7 +248,7 @@ class TestPublish(unittest.TestCase):
         self.assertTrue(any('"COMMENT"' in body for body in bodies))
 
     def test_existing_comment_is_patched(self):
-        comment = f"{rv.MARKER}\nReview: approve\n"
+        comment = f"{rv.MARKER}\nPR annotation review: approve\n"
         existing = json.dumps([{"id": 9, "body": rv.MARKER + "\nold"}])
 
         def payload(command):

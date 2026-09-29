@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarise a pull request and approve or fail from area findings.
+"""PR annotation review of a pull request, approving or failing from area findings.
 
 The input is a GitHub pull request link. Each area script reviews its
 own area. This command collects those results into one comment. It does
@@ -27,8 +27,8 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-PROG_NAME = "pr-review.py"
-MARKER = "<!-- snapd-pr-review -->"
+PROG_NAME = "pr-annotation-review.py"
+MARKER = "<!-- snapd-pr-annotation-review -->"
 _PLACEHOLDER = "<add your note here>"
 
 # The first areas return facts and no findings, so a clean run would
@@ -97,7 +97,7 @@ class PullRequest(NamedTuple):
 
 def _load(filename):
     """Load a hyphenated script beside this file."""
-    name = "pr_review_" + filename.replace("-", "_").replace(".", "_")
+    name = "pr_annotation_review_" + filename.replace("-", "_").replace(".", "_")
     cached = sys.modules.get(name)
     if cached is not None:
         return cached
@@ -194,7 +194,7 @@ def render_comment(note, omit, label_text, reviews, verdict):
     """Return the marked comment body."""
     lines = [
         MARKER,
-        f"Review: {verdict}",
+        f"PR annotation review: {verdict}",
         "",
         "## Information",
         "",
@@ -345,11 +345,11 @@ def print_help(out=None):
         out = sys.stdout
     prog = PROG_NAME
     flags = (
-        ("  -h, --help", "Help for pr-review"),
+        ("  -h, --help", "Help for pr-annotation-review"),
         ("  --publish", "Update the comment and submit the review"),
     )
     width = max(len(name) for name, _desc in flags)
-    print("Summarise a pull request from the area reviews.", file=out)
+    print("PR annotation review of a pull request from the area reviews.", file=out)
     print(file=out)
     print("The comment has an information section and a warnings", file=out)
     print("and errors section. An error finding exits 1. Any other", file=out)

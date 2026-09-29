@@ -1,6 +1,6 @@
 """Result of one area review.
 
-An area script returns AreaReview from review(). pr-review.py collects
+An area script returns AreaReview from review(). pr-annotation-review.py collects
 those results. This module does not read GitHub.
 """
 
