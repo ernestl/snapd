@@ -22,6 +22,7 @@ package seclog
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/overlord/restart"
@@ -195,6 +196,67 @@ func LogSystemStartupSnapd(snapdVersion, bootID string) {
 		Attr{Key: "snapd_version", Value: snapdVersion},
 		Attr{Key: "boot_id", Value: bootID},
 	)
+}
+
+// LogSystemRestart logs a requested OS reboot using the global security
+// logger. snapdVersion is the version of the exiting snapd process.
+// rst is a [restart.RestartType] and is recorded in the restart_type
+// attribute. [restart.RestartSystemRetry] records a repeated request
+// after the expected reboot did not happen. delay is the wait before
+// the reboot and is included in the description only when positive.
+// delay is not an attribute. A more specific restart reason is not
+// recorded yet.
+func LogSystemRestart(snapdVersion string, rst restart.RestartType, delay time.Duration) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	if snapdVersion == "" {
+		snapdVersion = unknown
+	}
+	typeStr := restartTypeString(rst)
+
+	description := fmt.Sprintf("System restart of type %s", typeStr)
+	if delay > 0 {
+		description = fmt.Sprintf("%s in %s", description, delay)
+	}
+
+	globalLogger.LogEvent(
+		Event{Category: "SYS", Name: "sys_restart", Level: LevelInfo},
+		description,
+		Attr{Key: "snapd_version", Value: snapdVersion},
+		Attr{Key: "restart_type", Value: typeStr},
+	)
+}
+
+// LogSystemShutdown logs a requested OS halt or poweroff using the global
+// security logger. snapdVersion is the version of the exiting snapd process.
+// rst is a [restart.RestartType] and is recorded in the restart_type
+// attribute. A more specific shutdown reason is not recorded yet.
+func LogSystemShutdown(snapdVersion string, rst restart.RestartType) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	if snapdVersion == "" {
+		snapdVersion = unknown
+	}
+	typeStr := restartTypeString(rst)
+
+	globalLogger.LogEvent(
+		Event{Category: "SYS", Name: "sys_shutdown", Level: LevelInfo},
+		fmt.Sprintf("System shutdown of type %s", typeStr),
+		Attr{Key: "snapd_version", Value: snapdVersion},
+		Attr{Key: "restart_type", Value: typeStr},
+	)
+}
+
+// restartTypeString returns the restart type attribute value, substituting
+// the unknown placeholder for an unset type. String() of an unset type is
+// "restart-type(0)", not an empty string.
+func restartTypeString(rst restart.RestartType) string {
+	if rst == restart.RestartUnset {
+		return unknown
+	}
+	return rst.String()
 }
 
 // LogLoginSuccess logs a successful login using the global security logger.

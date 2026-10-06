@@ -133,6 +133,19 @@ func (s *restartSuite) TestRequestStoresReason(c *C) {
 	c.Check(h.restartReason, Equals, restart.RestartSnapdUpdate)
 }
 
+func (s *restartSuite) TestRequestRestartSystemRetryPanics(c *C) {
+	st := state.New(nil)
+
+	st.Lock()
+	defer st.Unlock()
+
+	_, err := restart.Manager(st, "boot-id-1", nil)
+	c.Assert(err, IsNil)
+
+	c.Assert(func() { restart.Request(st, restart.RestartSystemRetry, nil, "") }, PanicMatches, "internal error: RestartSystemRetry cannot be requested")
+	c.Check(restart.Pending(st), Equals, restart.RestartUnset)
+}
+
 func (s *restartSuite) TestFinishTaskWithDaemonRestart(c *C) {
 	st := state.New(nil)
 
@@ -1361,6 +1374,7 @@ func (*restartSuite) TestStringfiedTypes(c *C) {
 		{restart.StopDaemon, "stop-daemon"},
 		{restart.RestartSystemHaltNow, "restart-system-halt-now"},
 		{restart.RestartSystemPoweroffNow, "restart-system-poweroff-now"},
+		{restart.RestartSystemRetry, "restart-system-retry"},
 		{restart.RestartType(123), "restart-type(123)"},
 	} {
 		c.Check(tc.typ.String(), Equals, tc.v)

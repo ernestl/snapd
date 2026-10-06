@@ -57,6 +57,10 @@ const (
 	RestartSystemHaltNow
 	// RestartSystemPoweroffNow will shutdown --poweroff the system asap
 	RestartSystemPoweroffNow
+	// RestartSystemRetry is the security-log type when snapd asks for a
+	// reboot again because the expected reboot did not happen. Do not
+	// pass it to Request or FinishTaskWithRestart.
+	RestartSystemRetry
 )
 
 func (r RestartType) String() string {
@@ -75,6 +79,8 @@ func (r RestartType) String() string {
 		return "restart-system-halt-now"
 	case RestartSystemPoweroffNow:
 		return "restart-system-poweroff-now"
+	case RestartSystemRetry:
+		return "restart-system-retry"
 	default:
 		return fmt.Sprintf("restart-type(%d)", r)
 	}
@@ -389,7 +395,11 @@ const (
 // Request asks for a restart of the managing process.
 // The state needs to be locked to request a restart.
 // reason may be empty when the caller has no more specific context yet.
+// RestartSystemRetry panics: that type is only for the security log.
 func Request(st *state.State, t RestartType, rebootInfo *boot.RebootInfo, reason RestartReason) {
+	if t == RestartSystemRetry {
+		panic("internal error: RestartSystemRetry cannot be requested")
+	}
 	rm := restartManager(st, "internal error: cannot request a restart before RestartManager initialization")
 	switch t {
 	case RestartSystem, RestartSystemNow, RestartSystemHaltNow, RestartSystemPoweroffNow:
