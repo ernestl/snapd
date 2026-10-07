@@ -376,6 +376,7 @@ func StoreInstallGoal(snaps ...StoreSnap) InstallGoal {
 			continue
 		}
 
+		sn.RevOpts.noteRequestedChannel()
 		seen[sn.InstanceName] = true
 		unique = append(unique, sn)
 	}
@@ -424,7 +425,10 @@ func (s *storeInstallGoal) toInstall(ctx context.Context, st *state.State, opts 
 			return nil, errors.New("internal error: device context is expected")
 		}
 		revOpts := &s.snaps[i].RevOpts
-		snapdUCTrackChannel, err := resolveSnapdUCTrackChannel(ctx, st, installedSnapdTrackingChannel(allSnaps), revOpts.Channel, opts.DeviceCtx.Model(), Store(st, opts.DeviceCtx), opts.UserID)
+		// The caller's channel was recorded when the goal was created.
+		// Channel may already be the stable default.
+		requestedChannel, _ := revOpts.recordedChannel()
+		snapdUCTrackChannel, err := resolveSnapdUCTrackChannel(ctx, st, installedSnapdTrackingChannel(allSnaps), requestedChannel, opts.DeviceCtx.Model(), Store(st, opts.DeviceCtx), opts.UserID)
 		if errors.Is(err, uctrack.ErrNotApplicable) {
 			err = nil
 		}
@@ -1467,6 +1471,7 @@ func StoreUpdateGoal(snaps ...StoreUpdate) UpdateGoal {
 			continue
 		}
 
+		sn.RevOpts.noteRequestedChannel()
 		mapping[sn.InstanceName] = sn
 	}
 
@@ -1583,15 +1588,17 @@ func initRefreshAllStoreUpdates(st *state.State, opts Options, allSnaps map[stri
 
 	updates := make(map[string]StoreUpdate, len(allSnaps))
 	for _, snapst := range allSnaps {
+		// The copied tracking channel is not a caller's --channel.
+		revOpts := RevisionOptions{
+			Channel:        snapst.TrackingChannel,
+			CohortKey:      snapst.CohortKey,
+			ValidationSets: vsets,
+		}
+		revOpts.requestedChannel = ""
+		revOpts.requestedChannelSet = true
 		updates[snapst.InstanceName().String()] = StoreUpdate{
 			InstanceName: snapst.InstanceName().String(),
-
-			// default the channel and cohort key to the existing values,
-			RevOpts: RevisionOptions{
-				Channel:        snapst.TrackingChannel,
-				CohortKey:      snapst.CohortKey,
-				ValidationSets: vsets,
-			},
+			RevOpts:      revOpts,
 		}
 	}
 	return updates, nil

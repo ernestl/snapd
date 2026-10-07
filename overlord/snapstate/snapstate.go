@@ -2160,6 +2160,32 @@ type RevisionOptions struct {
 	// snapdUCTrackChannel, when set, is the Ubuntu Core track channel that
 	// must be sent even if a validation-set pin clears Channel.
 	snapdUCTrackChannel string
+
+	// requestedChannel is the channel the caller passed. It is empty when
+	// the caller did not pass --channel. Planning may write a default into
+	// Channel without changing this value.
+	requestedChannel string
+	// requestedChannelSet reports that requestedChannel was recorded.
+	// An empty requestedChannel is a real value, so the zero value of the
+	// string alone cannot say whether it was recorded.
+	requestedChannelSet bool
+}
+
+// noteRequestedChannel records Channel as the caller's channel. A later
+// write to Channel does not change it. Recording twice keeps the first value.
+func (r *RevisionOptions) noteRequestedChannel() {
+	if r.requestedChannelSet {
+		return
+	}
+	r.requestedChannel = r.Channel
+	r.requestedChannelSet = true
+}
+
+// recordedChannel is the caller's channel. An empty channel with ok set
+// means the caller did not pass --channel. ok is false when the operation
+// did not record one; callers must not substitute Channel.
+func (r *RevisionOptions) recordedChannel() (channel string, ok bool) {
+	return r.requestedChannel, r.requestedChannelSet
 }
 
 func firstNonEmpty(strs ...string) string {

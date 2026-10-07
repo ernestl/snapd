@@ -873,6 +873,16 @@ func (f *fakeStore) SnapAction(ctx context.Context, currentSnaps []*store.Curren
 			}
 			info, err := f.snap(spec)
 			if err != nil {
+				// A refresh records the action before reporting that the
+				// revision is not on the channel. Record an install the same
+				// way so the asked channel and revision stay visible.
+				if f.revisionNotAvailableOnChannel[a.Channel] {
+					f.fakeBackend.appendOp(&fakeOp{
+						op:     "storesvc-snap-action:action",
+						action: *a,
+						userID: userID,
+					})
+				}
 				if a.Action == "install" {
 					installErrors[a.InstanceName] = err
 				} else {

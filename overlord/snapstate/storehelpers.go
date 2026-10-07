@@ -529,14 +529,10 @@ func storeUpdatePlanCore(
 		if opts.DeviceCtx == nil {
 			return updatePlan{}, errors.New("internal error: device context is expected")
 		}
-		// A refresh of every snap copies the tracking channel in as the
-		// request. That is not a caller's --channel, so policy follows the
-		// tracking channel. A named refresh keeps the caller's channel, which
-		// [validateAndInitStoreUpdates] has left unchanged for snapd.
-		requestedChannel := snapdUpdate.RevOpts.Channel
-		if plan.refreshAll() {
-			requestedChannel = ""
-		}
+		// requestedChannel is the channel the caller passed. A refresh of
+		// every snap records an empty one. Channel may already hold a
+		// default or the tracking channel, and is not the request.
+		requestedChannel, _ := snapdUpdate.RevOpts.recordedChannel()
 		snapdUCTrackChannel, err := resolveSnapdUCTrackChannel(ctx, st, installedSnapdTrackingChannel(allSnaps), requestedChannel, opts.DeviceCtx.Model(), Store(st, opts.DeviceCtx), opts.UserID)
 		if errors.Is(err, uctrack.ErrNotApplicable) {
 			err = nil

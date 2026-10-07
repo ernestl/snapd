@@ -117,238 +117,164 @@ func snapSetupFromTasks(c *C, ts *state.TaskSet) snapstate.SnapSetup {
 	return sup
 }
 
-func (s *snapmgrTestSuite) TestInstallSnapdKeepsRequestedChannel(c *C) {
+func (s *snapmgrTestSuite) TestInstallSnapdTrackPolicy(c *C) {
 	s.state.Lock()
 	defer s.state.Unlock()
+	defer func() { s.fakeStore.revisionNotAvailableOnChannel = nil }()
 
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
+	// Snapd is not installed. Policy uses stable, the install default, as
+	// tracking. That track is latest, so the map target is 18.
+	for _, t := range []struct {
+		label       string
+		channel     string
+		revision    snap.Revision
+		cohort      string
+		unavailable bool
+		installSent bool
+		action      string
+		setup       string
+		err         string
+		prohibited  bool
+	}{
+		{label: "follow", installSent: true, action: "18/stable", setup: "18/stable"},
+		{label: "honor stable", channel: "18/stable", installSent: true, action: "18/stable", setup: "18/stable"},
+		{label: "honor edge", channel: "18/edge", installSent: true, action: "18/edge", setup: "18/edge"},
+		{label: "honor branch", channel: "18/stable/hotfix", installSent: true, action: "18/stable/hotfix", setup: "18/stable/hotfix"},
+		{label: "prohibit stable", channel: "stable", err: `cannot use requested track "latest": resolved track is "18"`, prohibited: true},
+		{label: "prohibit edge", channel: "edge", err: `cannot use requested track "latest": resolved track is "18"`, prohibited: true},
+		{label: "prohibit latest edge branch", channel: "latest/edge/hotfix", err: `cannot use requested track "latest": resolved track is "18"`, prohibited: true},
+		{label: "prohibit fips", channel: "fips-updates/stable", err: `cannot use requested track "fips-updates": resolved track is "18"`, prohibited: true},
+		{label: "prohibit other", channel: "20/stable", err: `cannot use requested track "20": resolved track is "18"`, prohibited: true},
+		{label: "revision follows", revision: snap.R(42), installSent: true, action: "18/stable", setup: "18/stable"},
+		{label: "revision on honored channel", channel: "18/edge", revision: snap.R(42), installSent: true, action: "18/edge", setup: "18/edge"},
+		{label: "revision missing", revision: snap.R(42), unavailable: true, installSent: true, action: "18/stable", err: "no snap revision available as specified"},
+		{label: "prohibited before revision", channel: "stable", revision: snap.R(42), err: `cannot use requested track "latest": resolved track is "18"`, prohibited: true},
+		{label: "cohort follows", cohort: "cohort-1", installSent: true, action: "18/stable", setup: "18/stable"},
+	} {
+		s.fakeBackend.ops = nil
+		s.fakeStore.revisionNotAvailableOnChannel = nil
+		restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
+		s.mockSnapdUbuntuCoreTracks(ucTracks18)
+		snapstate.Set(s.state, "snapd", nil)
+		if t.unavailable {
+			s.fakeStore.revisionNotAvailableOnChannel = map[string]bool{t.action: true}
+		}
 
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "stable"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
+		var opts *snapstate.RevisionOptions
+		if t.channel != "" || !t.revision.Unset() || t.cohort != "" {
+			opts = &snapstate.RevisionOptions{Channel: t.channel, Revision: t.revision, CohortKey: t.cohort}
+		}
+		ts, err := snapstate.Install(context.Background(), s.state, "snapd", opts, s.user.ID, snapstate.Flags{})
+		restore()
 
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "stable")
-	c.Check(actions[0].Revision.Unset(), Equals, true)
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "stable")
-}
+		actions := s.snapActions("snapd")
+		c.Assert(actions, Not(HasLen), 0, Commentf(t.label))
+		assertLatestStablePrecursor(c, actions[0], t.label)
+		install := actions[1:]
+		if !t.installSent {
+			c.Assert(install, HasLen, 0, Commentf(t.label))
+		} else {
+			c.Assert(install, HasLen, 1, Commentf(t.label))
+			c.Check(install[0].Action, Equals, "install", Commentf(t.label))
+			c.Check(install[0].Channel, Equals, t.action, Commentf(t.label))
+			if t.revision.Unset() {
+				c.Check(install[0].Revision.Unset(), Equals, true, Commentf(t.label))
+			} else {
+				c.Check(install[0].Revision, Equals, t.revision, Commentf(t.label))
+			}
+			c.Check(install[0].CohortKey, Equals, t.cohort, Commentf(t.label))
+		}
 
-func (s *snapmgrTestSuite) TestInstallSnapdKeepsRequestedBranch(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err, Commentf(t.label))
+			if t.prohibited {
+				c.Check(errors.Is(err, uctrack.ErrRequestedChannelProhibited), Equals, true, Commentf(t.label))
+			}
+			continue
+		}
 
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	_, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "latest/edge/hotfix"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "latest/edge/hotfix")
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdAlreadyOnTrackPlansOnce(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	_, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "18/stable"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "18/stable")
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdPinnedRevisionKeepsRequestedChannel(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{
-		Channel:  "stable",
-		Revision: snap.R(42),
-	}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "stable")
-	c.Check(actions[0].Revision, Equals, snap.R(42))
-	sup := snapSetupFromTasks(c, ts)
-	c.Check(sup.Channel, Equals, "stable")
-	c.Check(sup.Revision(), Equals, snap.R(42))
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdByRevisionLeavesChannelEmpty(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{
-		Revision: snap.R(42),
-	}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "")
-	c.Check(actions[0].Revision, Equals, snap.R(42))
-	// By-revision install tracks stable. Track policy must not turn that into
-	// the Ubuntu Core track.
-	sup := snapSetupFromTasks(c, ts)
-	c.Check(sup.Channel, Equals, "stable")
-	c.Check(sup.Revision(), Equals, snap.R(42))
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdKeepsFipsUpdatesChannel(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "fips-updates/stable"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].Channel, Equals, "fips-updates/stable")
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "fips-updates/stable")
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdKeepsCohortAndRequestedChannel(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{
-		Channel:   "stable",
-		CohortKey: "cohort-1",
-	}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	c.Check(actions[0].CohortKey, Equals, "cohort-1")
-	c.Check(actions[0].Channel, Equals, "stable")
-	sup := snapSetupFromTasks(c, ts)
-	c.Check(sup.Channel, Equals, "stable")
-	c.Check(sup.CohortKey, Equals, "cohort-1")
-}
-
-func (s *snapmgrTestSuite) TestInstallSnapdPinnedRevisionIgnoresMappedTrack(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-	s.fakeStore.revisionNotAvailableOnChannel = map[string]bool{
-		"18/stable": true,
+		c.Assert(err, IsNil, Commentf(t.label))
+		sup := snapSetupFromTasks(c, ts)
+		c.Check(sup.Channel, Equals, t.setup, Commentf(t.label))
+		c.Check(sup.CohortKey, Equals, t.cohort, Commentf(t.label))
+		if !t.revision.Unset() {
+			c.Check(sup.Revision(), Equals, t.revision, Commentf(t.label))
+		}
 	}
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{
-		Channel:  "stable",
-		Revision: snap.R(42),
-	}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Channel, Equals, "stable")
-	c.Check(actions[0].Revision, Equals, snap.R(42))
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "stable")
 }
 
-func (s *snapmgrTestSuite) TestInstallSnapdValidationSetKeepsRequestedChannel(c *C) {
+func (s *snapmgrTestSuite) TestInstallSnapdValidationSetPin(c *C) {
 	s.state.Lock()
 	defer s.state.Unlock()
-
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
 
 	vsets := snapdValidationSetsPinning(c, "42")
 	restoreVsets := snapstate.MockEnforcedValidationSets(func(st *state.State, extraVss ...*asserts.ValidationSet) (*snapasserts.ValidationSets, error) {
 		return vsets, nil
 	})
 	defer restoreVsets()
+	defer func() { s.fakeStore.revisionNotAvailableOnChannel = nil }()
 
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "stable"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
+	// The pin is a revision. Channel policy runs first, then the pin is
+	// requested on the channel that policy produced.
+	for _, t := range []struct {
+		label       string
+		channel     string
+		revision    snap.Revision
+		unavailable bool
+		installSent bool
+		action      string
+		setup       string
+		err         string
+		prohibited  bool
+	}{
+		{label: "follow", installSent: true, action: "18/stable", setup: "18/stable"},
+		{label: "honor edge", channel: "18/edge", installSent: true, action: "18/edge", setup: "18/edge"},
+		{label: "unavailable", unavailable: true, installSent: true, action: "18/stable", err: "no snap revision available as specified"},
+		{label: "revision conflicts", channel: "18/edge", revision: snap.R(7), err: `cannot install snap "snapd" at revision 7 without --ignore-validation, revision 42 is required by validation sets: 16/foo/bar/1`},
+		{label: "prohibited channel", channel: "stable", revision: snap.R(7), err: `cannot use requested track "latest": resolved track is "18"`, prohibited: true},
+	} {
+		s.fakeBackend.ops = nil
+		s.fakeStore.revisionNotAvailableOnChannel = nil
+		restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
+		s.mockSnapdUbuntuCoreTracks(ucTracks18)
+		snapstate.Set(s.state, "snapd", nil)
+		if t.unavailable {
+			s.fakeStore.revisionNotAvailableOnChannel = map[string]bool{t.action: true}
+		}
 
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Action, Equals, "install")
-	// The validation-set pin clears the action channel. There is no mapped
-	// channel to restore, and tracking stays on the requested channel.
-	c.Check(actions[0].Channel, Equals, "")
-	c.Check(actions[0].Revision, Equals, snap.R(42))
-	sup := snapSetupFromTasks(c, ts)
-	c.Check(sup.Channel, Equals, "stable")
-	c.Check(sup.Revision(), Equals, snap.R(42))
-}
+		var opts *snapstate.RevisionOptions
+		if t.channel != "" || !t.revision.Unset() {
+			opts = &snapstate.RevisionOptions{Channel: t.channel, Revision: t.revision}
+		}
+		ts, err := snapstate.Install(context.Background(), s.state, "snapd", opts, s.user.ID, snapstate.Flags{})
+		restore()
 
-func (s *snapmgrTestSuite) TestInstallSnapdValidationSetIgnoresMappedTrack(c *C) {
-	s.state.Lock()
-	defer s.state.Unlock()
+		actions := s.snapActions("snapd")
+		c.Assert(actions, Not(HasLen), 0, Commentf(t.label))
+		assertLatestStablePrecursor(c, actions[0], t.label)
+		install := actions[1:]
+		if !t.installSent {
+			c.Assert(install, HasLen, 0, Commentf(t.label))
+		} else {
+			c.Assert(install, HasLen, 1, Commentf(t.label))
+			c.Check(install[0].Action, Equals, "install", Commentf(t.label))
+			c.Check(install[0].Channel, Equals, t.action, Commentf(t.label))
+			c.Check(install[0].Revision, Equals, snap.R(42), Commentf(t.label))
+		}
 
-	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
-	defer restore()
-	s.mockSnapdUbuntuCoreTracks(ucTracks18)
-	snapstate.Set(s.state, "snapd", nil)
-	s.fakeStore.revisionNotAvailableOnChannel = map[string]bool{
-		"18/stable": true,
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err, Commentf(t.label))
+			if t.prohibited {
+				c.Check(errors.Is(err, uctrack.ErrRequestedChannelProhibited), Equals, true, Commentf(t.label))
+			}
+			continue
+		}
+
+		c.Assert(err, IsNil, Commentf(t.label))
+		sup := snapSetupFromTasks(c, ts)
+		c.Check(sup.Channel, Equals, t.setup, Commentf(t.label))
+		c.Check(sup.Revision(), Equals, snap.R(42), Commentf(t.label))
 	}
-
-	vsets := snapdValidationSetsPinning(c, "42")
-	restoreVsets := snapstate.MockEnforcedValidationSets(func(st *state.State, extraVss ...*asserts.ValidationSet) (*snapasserts.ValidationSets, error) {
-		return vsets, nil
-	})
-	defer restoreVsets()
-
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "stable"}, s.user.ID, snapstate.Flags{})
-	c.Assert(err, IsNil)
-
-	actions := s.snapActions("snapd")
-	c.Assert(actions, HasLen, 1)
-	c.Check(actions[0].Channel, Equals, "")
-	c.Check(actions[0].Revision, Equals, snap.R(42))
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "stable")
 }
 
 func (s *snapmgrTestSuite) TestUpdateSnapdExplicitTrackingChannelIsProhibited(c *C) {
@@ -770,41 +696,117 @@ func (s *snapmgrTestSuite) TestUpdateSnapdEffectiveChannelMustMatchRequest(c *C)
 func (s *snapmgrTestSuite) TestInstallSnapdDoesNotFollowMappedTrackRedirect(c *C) {
 	s.state.Lock()
 	defer s.state.Unlock()
+	defer func() { s.fakeStore.redirectForAction = nil }()
 
 	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
 	defer restore()
 	s.mockSnapdUbuntuCoreTracks(ucTracks18)
 	snapstate.Set(s.state, "snapd", nil)
 	s.fakeStore.redirectForAction = func(action *store.SnapAction) string {
-		if strings.HasPrefix(action.Channel, "18/") {
+		if action.Action == "install" && strings.HasPrefix(action.Channel, "18/") {
 			return "24/stable"
 		}
 		return ""
 	}
 
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "stable"}, s.user.ID, snapstate.Flags{})
+	ts, err := snapstate.Install(context.Background(), s.state, "snapd", nil, s.user.ID, snapstate.Flags{})
 	c.Assert(err, IsNil)
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "stable")
+
+	actions := s.snapActions("snapd")
+	c.Assert(actions, HasLen, 2)
+	assertLatestStablePrecursor(c, actions[0], "redirect")
+	c.Check(actions[1].Action, Equals, "install")
+	c.Check(actions[1].Channel, Equals, "18/stable")
+	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "18/stable")
 }
 
 func (s *snapmgrTestSuite) TestInstallSnapdKeepsChannelWhenStoreWouldRedirect(c *C) {
 	s.state.Lock()
 	defer s.state.Unlock()
+	defer func() { s.fakeStore.redirectForAction = nil }()
 
 	restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
 	defer restore()
 	s.mockSnapdUbuntuCoreTracks(ucTracks18)
 	snapstate.Set(s.state, "snapd", nil)
 	s.fakeStore.redirectForAction = func(action *store.SnapAction) string {
-		if strings.HasPrefix(action.Channel, "18/") {
+		if action.Action == "install" && strings.HasPrefix(action.Channel, "18/") {
 			return "18/edge"
 		}
 		return ""
 	}
 
-	ts, err := snapstate.Install(context.Background(), s.state, "snapd", &snapstate.RevisionOptions{Channel: "stable"}, s.user.ID, snapstate.Flags{})
+	ts, err := snapstate.Install(context.Background(), s.state, "snapd", nil, s.user.ID, snapstate.Flags{})
 	c.Assert(err, IsNil)
-	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "stable")
+
+	actions := s.snapActions("snapd")
+	c.Assert(actions, HasLen, 2)
+	assertLatestStablePrecursor(c, actions[0], "redirect")
+	c.Check(actions[1].Channel, Equals, "18/stable")
+	c.Check(snapSetupFromTasks(c, ts).Channel, Equals, "18/stable")
+}
+
+func (s *snapmgrTestSuite) TestInstallSnapdEffectiveChannelMustMatchRequest(c *C) {
+	s.state.Lock()
+	defer s.state.Unlock()
+	defer func() {
+		s.fakeStore.redirectForAction = nil
+		s.fakeStore.effectiveChannelForAction = nil
+	}()
+
+	for _, t := range []struct {
+		label     string
+		channel   string
+		redirect  string
+		effective string
+		sent      string
+		err       string
+	}{
+		{label: "redirect ignored", redirect: "18/edge", sent: "18/stable"},
+		{label: "effective matches", redirect: "24/stable", effective: "18/stable", sent: "18/stable"},
+		{label: "honored channel", channel: "18/edge", redirect: "18/beta", effective: "18/edge", sent: "18/edge"},
+		{label: "effective other risk", effective: "18/edge", sent: "18/stable", err: `cannot follow Ubuntu Core track "18/stable": store reports effective channel "18/edge"`},
+		{label: "effective other track", effective: "24/stable", sent: "18/stable", err: `cannot follow Ubuntu Core track "18/stable": store reports effective channel "24/stable"`},
+		{label: "effective latest", effective: "latest/stable", sent: "18/stable", err: `cannot follow Ubuntu Core track "18/stable": store reports effective channel "latest/stable"`},
+	} {
+		s.fakeBackend.ops = nil
+		restore := snapstatetest.MockDeviceModel(ModelWithBase("core18"))
+		s.mockSnapdUbuntuCoreTracks(ucTracks18)
+		snapstate.Set(s.state, "snapd", nil)
+		sent, redirect, effective := t.sent, t.redirect, t.effective
+		s.fakeStore.redirectForAction = func(action *store.SnapAction) string {
+			if action.Action == "install" && action.Channel == sent {
+				return redirect
+			}
+			return ""
+		}
+		s.fakeStore.effectiveChannelForAction = func(action *store.SnapAction) string {
+			if action.Action == "install" && action.Channel == sent {
+				return effective
+			}
+			return ""
+		}
+
+		var opts *snapstate.RevisionOptions
+		if t.channel != "" {
+			opts = &snapstate.RevisionOptions{Channel: t.channel}
+		}
+		ts, err := snapstate.Install(context.Background(), s.state, "snapd", opts, s.user.ID, snapstate.Flags{})
+		restore()
+
+		actions := s.snapActions("snapd")
+		c.Assert(actions, HasLen, 2, Commentf(t.label))
+		assertLatestStablePrecursor(c, actions[0], t.label)
+		c.Check(actions[1].Action, Equals, "install", Commentf(t.label))
+		c.Check(actions[1].Channel, Equals, t.sent, Commentf(t.label))
+
+		if t.err != "" {
+			c.Assert(err, ErrorMatches, t.err, Commentf(t.label))
+			continue
+		}
+		c.Assert(err, IsNil, Commentf(t.label))
+		c.Check(snapSetupFromTasks(c, ts).Channel, Equals, t.sent, Commentf(t.label))
+	}
 }
 
 type snapdChannelPassThroughCase struct {
@@ -961,8 +963,9 @@ func (s *snapmgrTestSuite) TestInstallSnapdChannelPassThrough(c *C) {
 
 	s.assertSnapdChannelPassThrough(c, false, []snapdChannelPassThroughCase{
 		{label: "classic", model: ClassicModel(), tracks: ucTracks18, channel: "stable", want: "stable"},
-		{label: "missing map", model: ModelWithBase("core18"), channel: "stable", want: "stable"},
-		{label: "unknown track", model: ModelWithBase("core18"), tracks: ucTracks18, channel: "20/stable", want: "20/stable"},
+		{label: "classic no channel", model: ClassicModel(), tracks: ucTracks18, want: "stable"},
+		{label: "missing map", model: ModelWithBase("core18"), channel: "stable", want: "stable", precursor: true},
+		{label: "missing map no channel", model: ModelWithBase("core18"), want: "stable", precursor: true},
 	})
 }
 

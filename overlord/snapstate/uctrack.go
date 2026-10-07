@@ -51,12 +51,13 @@ func installedSnapdTrackingChannel(allSnaps map[string]*SnapState) string {
 
 // resolveSnapdUCTrackChannel resolves the snapd channel for model using the
 // latest/stable ubuntu-core-tracks from [latestStableSnapdTracks] and
-// [uctrack.Resolve]. trackingChannel is [installedSnapdTrackingChannel] and is
-// required: an install has none, so it is not resolved. requestedChannel is
-// the channel for this operation. It may be empty, which resolves the tracking
-// channel, including a revision refresh. The state lock must be held; it is
-// released for the store round-trip. Callers keep their channel on
-// [uctrack.ErrNotApplicable]. Any other error fails the operation.
+// [uctrack.Resolve]. trackingChannel is [installedSnapdTrackingChannel]. An
+// install has none, so it uses stable, the install default, which is the
+// latest track. requestedChannel is the channel the caller passed. It may be
+// empty, which resolves the tracking channel, including a revision refresh.
+// The state lock must be held; it is released for the store round-trip.
+// Callers keep their channel on [uctrack.ErrNotApplicable]. Any other error
+// fails the operation.
 func resolveSnapdUCTrackChannel(ctx context.Context, st *state.State, trackingChannel, requestedChannel string, model *asserts.Model, sto StoreService, userID int) (snapdUCTrackChannel string, err error) {
 	// [uctrack.SystemBootBaseApplicable] rejects classic, hybrid, a non-core
 	// base, and Ubuntu Core 16 from the model alone. The track map cannot
@@ -65,9 +66,10 @@ func resolveSnapdUCTrackChannel(ctx context.Context, st *state.State, trackingCh
 		return "", err
 	}
 
-	// An install has nothing tracked, so there is no track to resolve.
+	// A store install has no tracking channel. stable is the channel that
+	// install would use, and its track is latest.
 	if trackingChannel == "" {
-		return "", fmt.Errorf("%w: empty tracking channel", uctrack.ErrNotApplicable)
+		trackingChannel = "stable"
 	}
 
 	tracks, err := latestStableSnapdTracks(ctx, st, sto, userID)
